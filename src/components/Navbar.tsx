@@ -51,7 +51,19 @@ interface NavDropdownProps {
 
 function NavDropdown({ label, items, onNavigate, open, onOpen, onClose }: NavDropdownProps) {
   const ref = useRef<HTMLDivElement>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { dark } = useApp();
+
+  function scheduleClose() {
+    closeTimer.current = setTimeout(onClose, 300);
+  }
+
+  function cancelClose() {
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  }
 
   useEffect(() => {
     function handler(e: MouseEvent) {
@@ -65,8 +77,8 @@ function NavDropdown({ label, items, onNavigate, open, onOpen, onClose }: NavDro
     <div
       ref={ref}
       className="relative"
-      onMouseEnter={onOpen}
-      onMouseLeave={() => setTimeout(onClose, 120)}
+      onMouseEnter={() => { cancelClose(); onOpen(); }}
+      onMouseLeave={scheduleClose}
     >
       <button
         onClick={() => open ? onClose() : onOpen()}
@@ -85,16 +97,18 @@ function NavDropdown({ label, items, onNavigate, open, onOpen, onClose }: NavDro
 
       {open && (
         <div
-          className={`absolute top-full left-0 mt-1 w-52 border shadow-lg z-50 py-1 ${
+          className={`absolute top-full left-0 w-52 border shadow-lg z-50 py-1 ${
             dark
               ? "bg-[#1a1a1a] border-[#FAFAF5]/10"
               : "bg-white border-[#1a1a1a]/10"
           }`}
+          onMouseEnter={cancelClose}
+          onMouseLeave={scheduleClose}
         >
           {items.map((item) => (
             <button
               key={item.href}
-              onMouseDown={() => onNavigate(item.href)}
+              onMouseDown={() => { cancelClose(); onNavigate(item.href); }}
               className={`block w-full text-left font-body font-bold text-sm px-4 py-2.5 transition-colors ${
                 dark
                   ? "text-[#FAFAF5]/80 hover:text-[#F7931A] hover:bg-[#F7931A]/10"
