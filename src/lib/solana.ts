@@ -353,19 +353,19 @@ export async function transferSPLToken(
   const destATA = await getAssociatedTokenAddress(mintPubkey, recipientPubkey);
 
   // Fetch platform payer pubkey (it pays fees, not the signing keys)
-  const ppRes = await fetch("/api/storaqe/platform-pubkey");
+  const ppRes = await fetch("/api/qoin/platform-pubkey");
   const { publicKey: platformPubkeyStr } = await ppRes.json();
   const platformPubkey = new PublicKey(platformPubkeyStr);
 
   // Get blockhash via API (avoids CORS)
-  const bhRes = await fetch("/api/storaqe/blockhash");
+  const bhRes = await fetch("/api/qoin/blockhash");
   const { blockhash } = await bhRes.json();
 
   // Platform payer is fee payer the Qonjoint signing keys have no SOL
   const tx = new Transaction({ recentBlockhash: blockhash, feePayer: platformPubkey });
 
   // Check if destination ATA exists; if not, create it (platform payer funds rent)
-  const acctRes = await fetch(`/api/storaqe/account?address=${destATA.toBase58()}`);
+  const acctRes = await fetch(`/api/qoin/account?address=${destATA.toBase58()}`);
   const { exists } = await acctRes.json();
   if (!exists) {
     tx.add(
@@ -396,7 +396,81 @@ export async function transferSPLToken(
   const rawTx = tx.serialize({ requireAllSignatures: false });
 
   // Broadcast via API (avoids CORS)
-  const broadcastRes = await fetch("/api/storaqe/broadcast", {
+  const broadcastRes = await fetch("/api/qoin/broadcast", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ transaction: Array.from(rawTx) }),
+  });
+  const broadcastData = await broadcastRes.json();
+  if (!broadcastRes.ok) throw new Error(broadcastData.error || "Broadcast failed.");
+  return broadcastData.signature;
+}
+
+/**
+ * Transfers SPL tokens from a Qonjoint vault using two connected wallet sign functions
+ * (Phantom as Key 1, Solflare as Key 2). Chain-signs: wallet1 signs first,
+ * then wallet2 signs the partially-signed tx. Platform pays the fee.
+ */
+export async function transferSPLTokenWallets(
+  pubkey1: string,
+  pubkey2: string,
+  signWithWallet1: (tx: Transaction) => Promise<Transaction>,
+  signWithWallet2: (tx: Transaction) => Promise<Transaction>,
+  multisigAddress: string,
+  mintAddress: string,
+  sourceTokenAccount: string,
+  recipientAddress: string,
+  amount: number,
+  decimals: number
+): Promise<string> {
+  const multisigPubkey = new PublicKey(multisigAddress);
+  const mintPubkey = new PublicKey(mintAddress);
+  const recipientPubkey = new PublicKey(recipientAddress);
+  const sourceATA = new PublicKey(sourceTokenAccount);
+  const destATA = await getAssociatedTokenAddress(mintPubkey, recipientPubkey);
+  const signer1Pubkey = new PublicKey(pubkey1);
+  const signer2Pubkey = new PublicKey(pubkey2);
+
+  const ppRes = await fetch("/api/qoin/platform-pubkey");
+  const { publicKey: platformPubkeyStr } = await ppRes.json();
+  const platformPubkey = new PublicKey(platformPubkeyStr);
+
+  const bhRes = await fetch("/api/qoin/blockhash");
+  const { blockhash } = await bhRes.json();
+
+  const tx = new Transaction({ recentBlockhash: blockhash, feePayer: platformPubkey });
+
+  const acctRes = await fetch(`/api/qoin/account?address=${destATA.toBase58()}`);
+  const { exists } = await acctRes.json();
+  if (!exists) {
+    tx.add(
+      createAssociatedTokenAccountInstruction(
+        platformPubkey,
+        destATA,
+        recipientPubkey,
+        mintPubkey
+      )
+    );
+  }
+
+  const rawAmount = BigInt(Math.round(amount * Math.pow(10, decimals)));
+  tx.add(
+    createTransferInstruction(
+      sourceATA,
+      destATA,
+      multisigPubkey,
+      rawAmount,
+      [signer1Pubkey, signer2Pubkey],
+      TOKEN_PROGRAM_ID
+    )
+  );
+
+  const signedByWallet1 = await signWithWallet1(tx);
+  const signedByBoth = await signWithWallet2(signedByWallet1);
+
+  const rawTx = signedByBoth.serialize({ requireAllSignatures: false });
+
+  const broadcastRes = await fetch("/api/qoin/broadcast", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ transaction: Array.from(rawTx) }),
