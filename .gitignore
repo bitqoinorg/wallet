@@ -1,29 +1,6 @@
-# dependencies
-node_modules/
-.pnpm-store/
-
-# build output
-dist/
-build/
-.output/
-
-# environment
+node_modules
+dist
 .env
 .env.local
-.env.production
-*.pem
-*.key
-
-# logs
 *.log
-npm-debug.log*
-pnpm-debug.log*
-
-# editor
-.vscode/
-.idea/
-*.swp
 .DS_Store
-
-# testing
-coverage/
