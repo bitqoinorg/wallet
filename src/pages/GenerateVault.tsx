@@ -1,21 +1,21 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useLocation } from "wouter";
 import {
   generateKeypair,
-  getTokenDepositAddress,
-  createVaultTokenAccount,
-  isValidPublicKey,
   explorerUrl,
 } from "@/lib/solana";
-import { saveVaultAssociation, saveTokenDeposit, getTokenDeposits, type TokenDeposit } from "@/lib/vaultStore";
+import { saveVaultAssociation } from "@/lib/vaultStore";
 import {
-  SketchKey, SketchTwoKeys, SketchLock, SketchCoin, SketchCheckmark,
+  SketchKey, SketchTwoKeys, SketchLock,
   SketchWarning, SketchWave, SketchAtom, SketchShield
 } from "@/components/sketches";
 import Navbar from "@/components/Navbar";
 import { useApp } from "@/contexts/AppContext";
+import { useWalletPair } from "@/contexts/WalletPairContext";
 
 type Step = "intro" | "keys" | "creating" | "done";
+type CreateMode = "cold-keys" | "connect-wallets";
+
 interface KeyPair {
   publicKey: string;
   privateKey: string;
@@ -39,6 +39,15 @@ function CheckSVG() {
 export default function GenerateVault() {
   const [, navigate] = useLocation();
   const { dark } = useApp();
+  const {
+    phantomPubkey, solflarePubkey,
+    phantomConnecting, solflareConnecting,
+    phantomError, solflareError,
+    connectPhantom, connectSolflare,
+    disconnectPhantom, disconnectSolflare,
+  } = useWalletPair();
+
+  const [createMode, setCreateMode] = useState<CreateMode>("cold-keys");
   const [step, setStep] = useState<Step>("intro");
   const [pk1, setPk1] = useState<KeyPair | null>(null);
   const [pk2, setPk2] = useState<KeyPair | null>(null);
@@ -47,57 +56,7 @@ export default function GenerateVault() {
   const [error, setError] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
   const [keysConfirmed, setKeysConfirmed] = useState(false);
-
   const [openAccordion, setOpenAccordion] = useState<string | null>(null);
-  const [mintInput, setMintInput] = useState("");
-  const [depositAddress, setDepositAddress] = useState("");
-  const [creatingTA, setCreatingTA] = useState(false);
-  const [taSig, setTaSig] = useState("");
-  const [taError, setTaError] = useState("");
-  const [depositCopied, setDepositCopied] = useState(false);
-  const [savedDeposits, setSavedDeposits] = useState<TokenDeposit[]>([]);
-  const [tokenMeta, setTokenMeta] = useState<Record<string, { name: string; symbol: string; image: string }>>({});
-  const [showAllTokens, setShowAllTokens] = useState(false);
-  const QUICK_SHOW_COUNT = 4;
-
-  const POPULAR_TOKENS = [
-    { symbol: "USDC",    mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" },
-    { symbol: "USDT",    mint: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB" },
-    { symbol: "BONK",    mint: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263" },
-    { symbol: "TRUMP",   mint: "6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN" },
-    { symbol: "FARTCOIN",mint: "9BB6NFEcjBCtnNLFko2FqVQBq8HHM13kCyYcdQbgpump" },
-    { symbol: "PUMP",    mint: "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn" },
-    { symbol: "BUTTCOIN",mint: "Cm6fNnMk7NfzStP9CZpsQA2v3jjzbcYGAxdJySmHpump" },
-  ];
-
-  useEffect(() => {
-    const mints = POPULAR_TOKENS.map((t) => t.mint).join(",");
-    fetch(`/api/storaqe/token-meta?mints=${mints}`)
-      .then((r) => r.json())
-      .then((arr: { mint: string; name: string; symbol: string; image: string }[]) => {
-        const map: Record<string, { name: string; symbol: string; image: string }> = {};
-        arr.forEach((item) => { map[item.mint] = item; });
-        setTokenMeta(map);
-      })
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    if (shieldAddress) {
-      setSavedDeposits(getTokenDeposits(shieldAddress));
-    }
-  }, [shieldAddress]);
-
-  useEffect(() => {
-    if (!mintInput.trim() || !shieldAddress) return;
-    const existing = savedDeposits.find((d) => d.mintAddress === mintInput.trim());
-    if (existing) {
-      setDepositAddress(existing.depositAddress);
-      setTaSig("");
-    } else {
-      setDepositAddress("");
-    }
-  }, [mintInput, savedDeposits, shieldAddress]);
 
   function handleGenerateKeys() {
     setPk1(generateKeypair());
@@ -105,17 +64,16 @@ export default function GenerateVault() {
     setStep("keys");
   }
 
-  async function handleActivateShield() {
-    if (!pk1 || !pk2) return;
+  async function callCreateApi(pub1: string, pub2: string) {
     setError("");
     setStep("creating");
     try {
-      const res = await fetch("/api/storaqe/create", {
+      const res = await fetch("/api/qoin/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          pk1PublicKey: pk1.publicKey,
-          pk2PublicKey: pk2.publicKey,
+          pk1PublicKey: pub1,
+          pk2PublicKey: pub2,
           network: "mainnet",
         }),
       });
@@ -123,43 +81,22 @@ export default function GenerateVault() {
       if (!res.ok || data.error) throw new Error(data.error || "Failed to create Qoin.");
       setShieldAddress(data.multisigAddress!);
       setTxSig(data.signature!);
-      saveVaultAssociation(pk1.publicKey, pk2.publicKey, data.multisigAddress!, "mainnet");
+      saveVaultAssociation(pub1, pub2, data.multisigAddress!, "mainnet");
       setStep("done");
     } catch (e: unknown) {
       setError((e as Error).message || "Failed to create Qoin on-chain.");
-      setStep("keys");
+      setStep(createMode === "connect-wallets" ? "intro" : "keys");
     }
   }
 
-  async function handleComputeDepositAddress() {
-    if (!isValidPublicKey(mintInput.trim()) || !shieldAddress) return;
-    setTaError("");
-    setDepositAddress("");
-    const addr = getTokenDepositAddress(shieldAddress, mintInput.trim());
-    setDepositAddress(addr);
+  async function handleActivateShield() {
+    if (!pk1 || !pk2) return;
+    await callCreateApi(pk1.publicKey, pk2.publicKey);
   }
 
-  async function handleCreateTokenAccount() {
-    if (!shieldAddress || !mintInput) return;
-    setCreatingTA(true);
-    setTaError("");
-    try {
-      const res = await fetch("/api/storaqe/create-token-account", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ multisigAddress: shieldAddress, mintAddress: mintInput.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to create token account.");
-      setDepositAddress(data.tokenAccountAddress);
-      if (data.signature) setTaSig(data.signature);
-      saveTokenDeposit(shieldAddress, mintInput.trim(), data.tokenAccountAddress);
-      setSavedDeposits(getTokenDeposits(shieldAddress));
-    } catch (e: unknown) {
-      setTaError((e as Error).message || "Failed to create token account.");
-    } finally {
-      setCreatingTA(false);
-    }
+  async function handleCreateWithWallets() {
+    if (!phantomPubkey || !solflarePubkey) return;
+    await callCreateApi(phantomPubkey, solflarePubkey);
   }
 
   async function copyText(text: string, id: string) {
@@ -169,7 +106,9 @@ export default function GenerateVault() {
   }
 
   const steps: Step[] = ["intro", "keys", "creating", "done"];
-  const currentIdx = steps.indexOf(step);
+  const currentIdx = createMode === "connect-wallets"
+    ? (step === "intro" ? 0 : step === "creating" ? 2 : step === "done" ? 3 : 0)
+    : steps.indexOf(step);
 
   return (
     <div className={`min-h-screen font-body ${dark ? "bg-[#0f0f0f] text-[#FAFAF5]" : "bg-[#FAFAF5] text-[#1a1a1a]"}`}>
@@ -208,27 +147,31 @@ export default function GenerateVault() {
             {stepDefs.map((s, i) => {
               const done = i < currentIdx;
               const active = i === currentIdx;
+              const skip = createMode === "connect-wallets" && i === 1 && step !== "keys";
               return (
                 <div key={s.id} className="flex items-center flex-1 last:flex-none">
                   <div className="flex flex-col items-center gap-1.5 flex-shrink-0">
                     <div className={`w-10 h-10 rounded-full border-2 flex items-center justify-center font-sketch text-sm transition-all duration-300 ${
-                      done
+                      skip
+                        ? "bg-white border-[#1a1a1a] border-opacity-10 text-[#1a1a1a] opacity-15"
+                        : done
                         ? "bg-[#1a1a1a] border-[#1a1a1a] text-[#F7931A] shadow-[2px_2px_0_#F7931A]"
                         : active
                         ? "bg-[#F7931A] border-[#1a1a1a] text-white shadow-[3px_3px_0_#1a1a1a]"
                         : "bg-white border-[#1a1a1a] border-opacity-20 text-[#1a1a1a] opacity-30"
                     }`}>
-                      {done ? <CheckSVG /> : <span>{i + 1}</span>}
+                      {done && !skip ? <CheckSVG /> : <span>{i + 1}</span>}
                     </div>
                     <span className={`font-handwritten text-sm leading-none hidden sm:block ${
-                      active ? "text-[#F7931A] font-bold" : done ? "text-[#1a1a1a]" : "text-[#1a1a1a] opacity-30"
+                      skip ? "text-[#1a1a1a] opacity-20"
+                        : active ? "text-[#F7931A] font-bold" : done ? "text-[#1a1a1a]" : "text-[#1a1a1a] opacity-30"
                     }`}>
                       {s.label}
                     </span>
                   </div>
                   {i < stepDefs.length - 1 && (
                     <div className={`flex-1 h-0.5 mx-2 mt-0 sm:-mt-5 transition-colors duration-500 ${
-                      i < currentIdx ? "bg-[#F7931A]" : "bg-[#1a1a1a] opacity-10"
+                      i < currentIdx && !(createMode === "connect-wallets" && i === 1) ? "bg-[#F7931A]" : "bg-[#1a1a1a] opacity-10"
                     }`} />
                   )}
                 </div>
@@ -252,9 +195,111 @@ export default function GenerateVault() {
                 </p>
               </div>
 
-              <button onClick={handleGenerateKeys} className="btn-sketch w-full text-xl py-5 mb-4">
-                Generate My 2 Keys
-              </button>
+              {/* Mode selector */}
+              <div className="mb-5">
+                <div className="flex border-2 border-[#1a1a1a] rounded-sm overflow-hidden">
+                  <button
+                    onClick={() => { setCreateMode("cold-keys"); setError(""); }}
+                    className={`flex-1 py-3 font-body font-bold text-sm transition-all ${createMode === "cold-keys" ? "bg-[#1a1a1a] text-white" : "text-[#1a1a1a]/50 hover:bg-[#FAFAF5]"}`}
+                  >
+                    Cold Keys
+                  </button>
+                  <button
+                    onClick={() => { setCreateMode("connect-wallets"); setError(""); }}
+                    className={`flex-1 py-3 font-body font-bold text-sm transition-all border-l-2 border-[#1a1a1a] ${createMode === "connect-wallets" ? "bg-[#1a1a1a] text-white" : "text-[#1a1a1a]/50 hover:bg-[#FAFAF5]"}`}
+                  >
+                    Connect Wallets
+                  </button>
+                </div>
+              </div>
+
+              {/* Cold Keys: original generate button */}
+              {createMode === "cold-keys" && (
+                <button onClick={handleGenerateKeys} className="btn-sketch w-full text-xl py-5 mb-4">
+                  Generate My 2 Keys
+                </button>
+              )}
+
+              {/* Connect Wallets: Phantom + Solflare blocks */}
+              {createMode === "connect-wallets" && (
+                <div className="space-y-4 mb-4">
+                  <p className="font-handwritten text-sm text-[#1a1a1a]/40">
+                    Connect Phantom as Key 1 and Solflare as Key 2. Their public keys register on-chain as your Qonjoint signers.
+                  </p>
+
+                  {/* Phantom block */}
+                  <div className="border-2 border-[#1a1a1a] rounded-sm overflow-hidden">
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-[#1a1a1a]/10 bg-[#FAFAF5]">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: phantomPubkey ? "#F7931A" : "#1a1a1a", opacity: phantomPubkey ? 1 : 0.2 }} />
+                        <span className="font-body font-bold text-sm text-[#1a1a1a]">Key 1 — Phantom</span>
+                      </div>
+                      {phantomPubkey && (
+                        <span className="font-mono text-xs text-[#1a1a1a]/40">{phantomPubkey.slice(0, 6)}...{phantomPubkey.slice(-4)}</span>
+                      )}
+                    </div>
+                    <div className="px-4 py-3">
+                      {phantomError && <p className="font-handwritten text-xs text-[#F7931A] mb-2">{phantomError}</p>}
+                      {phantomPubkey ? (
+                        <button onClick={disconnectPhantom} className="w-full font-body font-bold text-xs py-2 border border-[#1a1a1a]/20 rounded-sm hover:bg-[#FAFAF5] transition-all">
+                          Disconnect Phantom
+                        </button>
+                      ) : (
+                        <button
+                          onClick={connectPhantom}
+                          disabled={phantomConnecting}
+                          className="w-full font-body font-bold text-sm py-2.5 border-2 border-[#1a1a1a] rounded-sm bg-white hover:bg-[#1a1a1a] hover:text-white transition-all disabled:opacity-40"
+                        >
+                          {phantomConnecting ? "Connecting..." : "Connect Phantom"}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Solflare block */}
+                  <div className="border-2 border-[#1a1a1a] rounded-sm overflow-hidden">
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-[#1a1a1a]/10 bg-[#FAFAF5]">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: solflarePubkey ? "#F7931A" : "#1a1a1a", opacity: solflarePubkey ? 1 : 0.2 }} />
+                        <span className="font-body font-bold text-sm text-[#1a1a1a]">Key 2 — Solflare</span>
+                      </div>
+                      {solflarePubkey && (
+                        <span className="font-mono text-xs text-[#1a1a1a]/40">{solflarePubkey.slice(0, 6)}...{solflarePubkey.slice(-4)}</span>
+                      )}
+                    </div>
+                    <div className="px-4 py-3">
+                      {solflareError && <p className="font-handwritten text-xs text-[#F7931A] mb-2">{solflareError}</p>}
+                      {solflarePubkey ? (
+                        <button onClick={disconnectSolflare} className="w-full font-body font-bold text-xs py-2 border border-[#1a1a1a]/20 rounded-sm hover:bg-[#FAFAF5] transition-all">
+                          Disconnect Solflare
+                        </button>
+                      ) : (
+                        <button
+                          onClick={connectSolflare}
+                          disabled={solflareConnecting}
+                          className="w-full font-body font-bold text-sm py-2.5 border-2 border-[#1a1a1a] rounded-sm bg-white hover:bg-[#1a1a1a] hover:text-white transition-all disabled:opacity-40"
+                        >
+                          {solflareConnecting ? "Connecting..." : "Connect Solflare"}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {error && <p className="font-handwritten text-sm text-[#F7931A]">{error}</p>}
+
+                  <button
+                    onClick={handleCreateWithWallets}
+                    disabled={!phantomPubkey || !solflarePubkey}
+                    className="btn-sketch w-full text-xl py-5 disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    {!phantomPubkey || !solflarePubkey ? "Connect both wallets first" : "Create My Qoin"}
+                  </button>
+                  <p className="font-handwritten text-sm text-center text-[#1a1a1a]/30">
+                    No keys generated. Your wallet pubkeys register as Qonjoint signers.
+                  </p>
+                </div>
+              )}
+
               <p className="text-center font-handwritten text-lg text-[#1a1a1a]/50">
                 Already have a Qoin?{" "}
                 <button onClick={() => navigate("/qoin/open")} className="text-[#F7931A] underline underline-offset-2">
@@ -263,9 +308,8 @@ export default function GenerateVault() {
               </p>
             </div>
 
-            {/* Right: vault diagram card */}
+            {/* Right: vault diagram card — unchanged */}
             <div className="sketch-card p-6">
-              {/* Vault diagram: Qonjoint key composition */}
               <div className="flex items-center justify-center gap-4 mb-5 py-3 border-b-2 border-dashed border-[#1a1a1a]/10">
                 <div className="flex flex-col items-center gap-1">
                   <SketchKey className="w-12 h-8 text-[#1a1a1a]" />
@@ -322,7 +366,7 @@ export default function GenerateVault() {
           </div>
         )}
 
-        {/* STEP 2: KEYS */}
+        {/* STEP 2: KEYS (cold-keys mode only) */}
         {step === "keys" && pk1 && pk2 && (
           <div className="max-w-6xl mx-auto">
             <div className="mb-8 text-center">
@@ -332,26 +376,22 @@ export default function GenerateVault() {
 
             {error && <div className="error-sketch mb-6 font-body text-base text-[#1a1a1a]/70">{error}</div>}
 
-            {/* Key 1 LEFT / Key 2 RIGHT side by side */}
             <div className="grid md:grid-cols-2 gap-5 mb-6">
               {[
                 { label: "Key 1", tag: "You hold this", tagColor: "#1a1a1a", key: pk1, id: "pk1" },
                 { label: "Key 2", tag: "Store separately", tagColor: "#F7931A", key: pk2, id: "pk2" },
               ].map(({ label, tag, tagColor, key, id }) => (
                 <div key={id} className="overflow-hidden border-2 border-[#1a1a1a] rounded-sm shadow-[4px_4px_0_#1a1a1a] flex flex-col">
-                  {/* Card header */}
                   <div className="flex items-center justify-between px-5 py-3 bg-white border-b-2 border-[#1a1a1a]">
                     <span className="font-sketch text-xl">{label}</span>
                     <span className="font-handwritten text-sm px-2.5 py-0.5 border rounded-sm" style={{ color: tagColor, borderColor: tagColor }}>{tag}</span>
                   </div>
 
-                  {/* Public key zone */}
                   <div className="px-5 py-4 bg-[#FAFAF5] border-b border-dashed border-[#1a1a1a]/10">
                     <div className="font-handwritten text-xs text-[#1a1a1a]/30 uppercase tracking-widest mb-1.5">Public Key (safe to share)</div>
                     <div className="font-mono text-xs text-[#1a1a1a]/40 break-all leading-relaxed">{key.publicKey}</div>
                   </div>
 
-                  {/* Private key zone */}
                   <div className="px-5 py-4 bg-[#FAFAF5] flex flex-col flex-1">
                     <div className="flex items-center gap-2 mb-1.5">
                       <SketchWarning className="w-4 h-4 flex-shrink-0" />
@@ -373,7 +413,6 @@ export default function GenerateVault() {
               ))}
             </div>
 
-            {/* Confirmation block */}
             <div className="border-2 border-[#F7931A] bg-[#FAFAF5] rounded-sm shadow-[4px_4px_0_#F7931A] mb-6 overflow-hidden">
               <div className="flex items-center gap-3 px-5 py-3 border-b border-[#F7931A] border-opacity-30 bg-[#F7931A]">
                 <span className="flex-shrink-0" style={{ filter: "brightness(10)" }}><SketchWarning className="w-6 h-6" /></span>
@@ -433,12 +472,11 @@ export default function GenerateVault() {
         )}
 
         {/* STEP 4: DONE */}
-        {step === "done" && pk1 && pk2 && (
+        {step === "done" && (
           <div className="max-w-7xl mx-auto">
             <div className="grid md:grid-cols-2 gap-8 items-start">
               {/* LEFT COLUMN */}
               <div>
-                {/* Success header */}
                 <div className="flex items-center gap-4 mb-8">
                   <div className="w-16 h-16 flex-shrink-0">
                     <SketchLock className="w-full h-full text-[#1a1a1a]" />
@@ -475,190 +513,77 @@ export default function GenerateVault() {
                   </div>
                 </div>
 
-                {/* Key recap accordion */}
-                <div className="space-y-4">
-                  <div className="font-sketch text-2xl text-[#1a1a1a] mb-2">Your Private Keys</div>
-                  {[{ label: "Key 1", key: pk1, id: "done-pk1" }, { label: "Key 2", key: pk2, id: "done-pk2" }].map(({ label, key, id }) => {
-                    const isOpen = openAccordion === id;
-                    return (
-                      <div key={id} className="overflow-hidden border-2 border-[#1a1a1a] rounded-sm shadow-[3px_3px_0_#1a1a1a]">
-                        <button
-                          onClick={() => setOpenAccordion(isOpen ? null : id)}
-                          className="flex items-center justify-between w-full px-5 py-4 bg-[#F7931A] border-b-2 border-[#1a1a1a] text-left hover:brightness-95 transition-all"
-                        >
-                          <span className="font-sketch text-lg text-[#FAFAF5]">{label} Private Key</span>
-                          <svg viewBox="0 0 20 20" fill="none" className={`w-6 h-6 text-[#FAFAF5] transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}>
-                            <path d="M5 7l5 5 5-5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-                          </svg>
-                        </button>
-                        {isOpen && (
-                          <div className="px-5 py-4 bg-[#FAFAF5] mode-panel-enter">
-                            <div className="font-handwritten text-sm text-[#1a1a1a]/40 mb-2 uppercase tracking-wide">Private Key</div>
-                            <div className="font-mono text-sm text-[#1a1a1a] break-all mb-4 leading-relaxed p-3 bg-white border border-[#1a1a1a] border-opacity-10 rounded-sm">{key.privateKey}</div>
-                            <button onClick={() => copyText(key.privateKey, id)} className="btn-sketch-outline w-full text-base py-3 bg-white">
-                              {copied === id ? "Copied!" : `Copy ${label} Private Key`}
-                            </button>
-                          </div>
-                        )}
+                {/* Key recap accordion — cold-keys mode only */}
+                {createMode === "cold-keys" && pk1 && pk2 && (
+                  <div className="space-y-4">
+                    <div className="font-sketch text-2xl text-[#1a1a1a] mb-2">Your Private Keys</div>
+                    {[{ label: "Key 1", key: pk1, id: "done-pk1" }, { label: "Key 2", key: pk2, id: "done-pk2" }].map(({ label, key, id }) => {
+                      const isOpen = openAccordion === id;
+                      return (
+                        <div key={id} className="overflow-hidden border-2 border-[#1a1a1a] rounded-sm shadow-[3px_3px_0_#1a1a1a]">
+                          <button
+                            onClick={() => setOpenAccordion(isOpen ? null : id)}
+                            className="flex items-center justify-between w-full px-5 py-4 bg-[#F7931A] border-b-2 border-[#1a1a1a] text-left hover:brightness-95 transition-all"
+                          >
+                            <span className="font-sketch text-lg text-[#FAFAF5]">{label} Private Key</span>
+                            <svg viewBox="0 0 20 20" fill="none" className={`w-6 h-6 text-[#FAFAF5] transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}>
+                              <path d="M5 7l5 5 5-5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+                            </svg>
+                          </button>
+                          {isOpen && (
+                            <div className="px-5 py-4 bg-[#FAFAF5] mode-panel-enter">
+                              <div className="font-handwritten text-sm text-[#1a1a1a]/40 mb-2 uppercase tracking-wide">Private Key</div>
+                              <div className="font-mono text-sm text-[#1a1a1a] break-all mb-4 leading-relaxed p-3 bg-white border border-[#1a1a1a] border-opacity-10 rounded-sm">{key.privateKey}</div>
+                              <button onClick={() => copyText(key.privateKey, id)} className="btn-sketch-outline w-full text-base py-3 bg-white">
+                                {copied === id ? "Copied!" : `Copy ${label} Private Key`}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Connect Wallets mode done: remind which wallets were used */}
+                {createMode === "connect-wallets" && (
+                  <div className="border-2 border-[#1a1a1a]/10 rounded-sm overflow-hidden">
+                    <div className="px-5 py-3 border-b border-[#1a1a1a]/10 bg-[#FAFAF5]">
+                      <div className="font-sketch text-base text-[#1a1a1a]">Registered Signers</div>
+                    </div>
+                    <div className="px-5 py-4 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-body font-bold text-sm text-[#1a1a1a]/50">Key 1 — Phantom</span>
+                        <span className="font-mono text-xs text-[#F7931A]">{phantomPubkey ? `${phantomPubkey.slice(0, 8)}...${phantomPubkey.slice(-6)}` : "—"}</span>
                       </div>
-                    );
-                  })}
-                </div>
+                      <div className="flex items-center justify-between">
+                        <span className="font-body font-bold text-sm text-[#1a1a1a]/50">Key 2 — Solflare</span>
+                        <span className="font-mono text-xs text-[#F7931A]">{solflarePubkey ? `${solflarePubkey.slice(0, 8)}...${solflarePubkey.slice(-6)}` : "—"}</span>
+                      </div>
+                      <p className="font-handwritten text-sm text-[#1a1a1a]/30 pt-1">
+                        Keep these wallets to sign transactions. Losing both wallet access means losing your tokens.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* RIGHT COLUMN */}
               <div>
-                {/* Token deposit section unified sidebar style */}
-                <div className="sketch-card bg-[#FAFAF5] overflow-hidden mb-6">
-                  <div className="px-5 py-4 border-b border-[#1a1a1a]/10">
-                    <div className="font-sketch text-xl text-[#1a1a1a] mb-0.5">Token Deposit Addresses</div>
-                    <p className="font-handwritten text-sm text-[#1a1a1a]/40">Each token needs its own address. Pick one to get started.</p>
-                  </div>
-
-                  {/* YOUR TOKENS section */}
-                  {savedDeposits.length > 0 && (
-                    <div className="border-b border-[#1a1a1a]/10">
-                      <div className="px-5 py-2 bg-[#1a1a1a]">
-                        <span className="font-handwritten text-xs text-white/50 uppercase tracking-widest">Your Tokens</span>
-                      </div>
-                      {savedDeposits.map((d) => {
-                        const meta = tokenMeta[d.mintAddress];
-                        const fallbackSymbol = POPULAR_TOKENS.find((t) => t.mint === d.mintAddress)?.symbol;
-                        const logo = meta?.image ?? "";
-                        const label = meta?.symbol ?? fallbackSymbol ?? d.mintAddress.slice(0, 6) + "...";
-                        const isActive = mintInput === d.mintAddress;
-                        return (
-                          <button
-                            key={d.mintAddress}
-                            onClick={() => { setMintInput(d.mintAddress); setTaError(""); }}
-                            className={`w-full flex items-center gap-3 px-5 py-3.5 text-left transition-all border-b border-[#1a1a1a]/5 last:border-0 ${isActive ? "bg-[#F7931A]/10 border-l-4 border-l-[#F7931A]" : "bg-white hover:bg-[#FAFAF5]"}`}
-                          >
-                            {logo ? (
-                              <img src={logo} alt={label} className="w-8 h-8 rounded-full object-cover flex-shrink-0" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
-                            ) : (
-                              <div className="w-8 h-8 rounded-full bg-[#1a1a1a]/10 flex-shrink-0 flex items-center justify-center">
-                                <span className="font-sketch text-xs text-[#1a1a1a]/40">{label.slice(0, 2)}</span>
-                              </div>
-                            )}
-                            <div className="min-w-0 flex-1">
-                              <div className="font-body font-bold text-sm text-[#1a1a1a]">{label}</div>
-                              <div className="font-mono text-xs text-[#1a1a1a]/30 truncate">{d.depositAddress.slice(0, 20)}...</div>
-                            </div>
-                            <div className="flex items-center gap-2 flex-shrink-0">
-                              <span className="font-handwritten text-xs text-[#F7931A]">Ready</span>
-                              <button
-                                onClick={async (e) => {
-                                  e.stopPropagation();
-                                  await navigator.clipboard.writeText(d.depositAddress);
-                                  setCopied("dep-" + d.mintAddress);
-                                  setTimeout(() => setCopied(null), 2000);
-                                }}
-                                className="font-body font-bold text-xs px-2 py-1 border border-[#1a1a1a]/20 rounded-sm hover:bg-[#F7931A] hover:text-white hover:border-[#F7931A] transition-all"
-                              >
-                                {copied === "dep-" + d.mintAddress ? "Copied!" : "Copy"}
-                              </button>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {/* POPULAR section */}
-                  <div className="border-b border-[#1a1a1a]/10">
-                    <div className="px-5 py-2 bg-[#FAFAF5]">
-                      <span className="font-handwritten text-xs text-[#1a1a1a]/40 uppercase tracking-widest">Popular</span>
-                    </div>
-                    {POPULAR_TOKENS.slice(0, showAllTokens ? POPULAR_TOKENS.length : QUICK_SHOW_COUNT).map((t) => {
-                      const meta = tokenMeta[t.mint];
-                      const isActive = mintInput === t.mint;
-                      const alreadySaved = savedDeposits.some((d) => d.mintAddress === t.mint);
-                      return (
-                        <button
-                          key={t.mint}
-                          onClick={() => { setMintInput(t.mint); setTaError(""); }}
-                          className={`w-full flex items-center gap-3 px-5 py-3.5 text-left transition-all border-b border-[#1a1a1a]/5 last:border-0 ${isActive ? "bg-[#F7931A]/10 border-l-4 border-l-[#F7931A]" : "bg-white hover:bg-[#FAFAF5]"}`}
-                        >
-                          {meta?.image ? (
-                            <img src={meta.image} alt={t.symbol} className="w-8 h-8 rounded-full object-cover flex-shrink-0" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
-                          ) : (
-                            <div className="w-8 h-8 rounded-full bg-[#1a1a1a]/10 flex-shrink-0 flex items-center justify-center">
-                              <span className="font-sketch text-xs text-[#1a1a1a]/40">{t.symbol.slice(0, 2)}</span>
-                            </div>
-                          )}
-                          <div className="min-w-0 flex-1">
-                            <div className="font-body font-bold text-sm text-[#1a1a1a]">{meta?.symbol ?? t.symbol}</div>
-                            <div className="font-handwritten text-xs text-[#1a1a1a]/30">{meta?.name ?? ""}</div>
-                          </div>
-                          {alreadySaved && <span className="font-handwritten text-xs text-[#F7931A] flex-shrink-0">Ready</span>}
-                          {isActive && !alreadySaved && <span className="font-handwritten text-xs text-[#1a1a1a]/30 flex-shrink-0">Selected</span>}
-                        </button>
-                      );
-                    })}
-                    {!showAllTokens && POPULAR_TOKENS.length > QUICK_SHOW_COUNT && (
-                      <button
-                        onClick={() => setShowAllTokens(true)}
-                        className="w-full px-5 py-3 text-left font-handwritten text-sm text-[#1a1a1a]/40 hover:text-[#F7931A] hover:bg-[#FAFAF5] transition-all flex items-center gap-2 bg-white"
-                      >
-                        <svg viewBox="0 0 16 16" fill="none" className="w-4 h-4"><path d="M8 3v10M3 8l5 5 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                        {POPULAR_TOKENS.length - QUICK_SHOW_COUNT} more tokens
-                      </button>
-                    )}
-                  </div>
-
-                  {/* OTHER custom mint input */}
-                  <div className="px-5 py-4 bg-white border-b border-[#1a1a1a]/10">
-                    <label className="font-handwritten text-xs text-[#1a1a1a]/40 uppercase tracking-wide mb-2 block">Other token mint address</label>
-                    <input
-                      type="text"
-                      value={mintInput}
-                      onChange={(e) => { setMintInput(e.target.value); setTaError(""); }}
-                      placeholder="Paste any mint address..."
-                      className="input-sketch text-sm py-2.5 bg-[#FAFAF5]"
-                    />
-                  </div>
-
-                  {/* Action + result */}
-                  <div className="px-5 py-4 bg-[#FAFAF5]">
-                    {taError && <div className="border-2 border-[#F7931A] bg-white p-3 rounded-sm mb-3 text-[#1a1a1a]/70 font-body text-sm">{taError}</div>}
-                    <button
-                      onClick={handleCreateTokenAccount}
-                      disabled={!isValidPublicKey(mintInput.trim()) || creatingTA || !!depositAddress}
-                      className="btn-sketch w-full text-base py-3.5 mb-2 disabled:opacity-30 disabled:cursor-not-allowed"
-                    >
-                      {creatingTA ? "Creating..." : depositAddress ? "Deposit Address Ready" : "Get Deposit Address"}
-                    </button>
-                    <p className="font-handwritten text-xs text-[#1a1a1a]/25 text-center mb-3">One time per token. Saved to this device.</p>
-                    {depositAddress && (
-                      <div className="border-2 border-[#1a1a1a] bg-white rounded-sm p-4 shadow-[3px_3px_0_#1a1a1a]">
-                        <div className="font-handwritten text-xs text-[#1a1a1a]/40 uppercase tracking-wide mb-2">Deposit Address</div>
-                        <div className="font-mono text-xs text-[#1a1a1a] break-all mb-3 p-2 bg-[#FAFAF5] rounded-sm">{depositAddress}</div>
-                        {taSig && <div className="font-handwritten text-sm text-[#F7931A] mb-3">Created on-chain.</div>}
-                        <button
-                          onClick={async () => { await navigator.clipboard.writeText(depositAddress); setDepositCopied(true); setTimeout(() => setDepositCopied(false), 2000); }}
-                          className="btn-sketch-outline bg-[#FAFAF5] w-full text-sm py-2.5"
-                        >
-                          {depositCopied ? "Copied!" : "Copy Deposit Address"}
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Save reminder warning */}
                 <div className="border-2 border-[#F7931A] bg-[#FAFAF5] rounded-sm shadow-[4px_4px_0_#F7931A] p-5 mb-8">
                   <div className="flex items-start gap-4">
                     <SketchWarning className="w-8 h-8 flex-shrink-0 text-[#F7931A]" />
                     <div>
                       <div className="font-sketch text-xl text-[#1a1a1a] mb-1">Keys Needed to Move: Both</div>
                       <p className="font-body text-base text-[#1a1a1a]/70">
-                        Save Key 1, Key 2, and the Qoin Address. All three. We do not store any of this. Losing them means losing your tokens permanently.
+                        {createMode === "cold-keys"
+                          ? "Save Key 1, Key 2, and the Qoin Address. All three. We do not store any of this. Losing them means losing your tokens permanently."
+                          : "Save the Qoin Address. Both Phantom and Solflare wallets must be available to sign any transfer. Losing access to both means losing your tokens permanently."}
                       </p>
                     </div>
                   </div>
                 </div>
 
-                {/* Open My Qoin button */}
                 <button onClick={() => navigate("/qoin/open")} className="btn-sketch w-full text-2xl py-6 shadow-[6px_6px_0_#1a1a1a]">
                   Open My Qoin
                 </button>
