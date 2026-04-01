@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 import {
   isValidPrivateKey,
   isValidPublicKey,
+  keypairFromPrivateKey,
   getTokenDepositAddress,
   explorerAddressUrl,
   explorerUrl,
@@ -12,6 +13,7 @@ import {
   SketchCheckmark, SketchX, SketchShield, SketchTwoKeys,
 } from "@/components/sketches";
 import { useApp } from "@/contexts/AppContext";
+import { saveTokenDeposit } from "@/lib/vaultStore";
 import {
   AreaChart, Area, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
@@ -76,6 +78,22 @@ export default function AccessVault() {
   const [chartLoading, setChartLoading] = useState(false);
   const [chartChange, setChartChange] = useState<number | null>(null);
 
+  const [txHistory, setTxHistory] = useState<Array<{
+    sig: string; ts: number;
+    tokenTransfers: Array<{ mint: string; from: string; to: string; amount: number }>;
+    nativeTransfers: Array<{ from: string; to: string; lamports: number }>;
+    err: unknown;
+  }>>([]);
+  const [txHistoryLoading, setTxHistoryLoading] = useState(false);
+
+  const [showAddToken, setShowAddToken] = useState(false);
+  const [customMint, setCustomMint] = useState("");
+  const [customDepositAddr, setCustomDepositAddr] = useState("");
+  const [customMintCopied, setCustomMintCopied] = useState(false);
+  const [customCreating, setCustomCreating] = useState(false);
+  const [customTaError, setCustomTaError] = useState("");
+  const [customTaSig, setCustomTaSig] = useState("");
+
   const [dexPrices, setDexPrices] = useState<Record<string, { price: number; change24h: number | null }>>({});
 
   const pk1Valid = isValidPrivateKey(pk1.trim());
@@ -84,7 +102,7 @@ export default function AccessVault() {
 
   useEffect(() => {
     const mints = POPULAR_TOKENS.map((t) => t.mint).join(",");
-    fetch(`/api/storaqe/token-meta?mints=${mints}`)
+    fetch(`/api/qoin/token-meta?mints=${mints}`)
       .then((r) => r.json())
       .then((arr: { mint: string; name: string; symbol: string; image: string }[]) => {
         const map: Record<string, { name: string; symbol: string; image: string }> = {};
@@ -98,7 +116,7 @@ export default function AccessVault() {
     setChartData([]);
     setChartChange(null);
     setChartLoading(true);
-    fetch(`/api/storaqe/price-chart?mint=${encodeURIComponent(mint)}&days=7`)
+    fetch(`/api/qoin/price-chart?mint=${encodeURIComponent(mint)}&days=7`)
       .then((r) => r.json())
       .then((d: { prices: { time: number; price: number }[]; change24h: number | null }) => {
         setChartData(d.prices ?? []);
@@ -112,10 +130,25 @@ export default function AccessVault() {
     fetchChart(sidebarSelected);
   }, [sidebarSelected, fetchChart]);
 
+  useEffect(() => {
+    if (!activeShieldAddress) return;
+    const addr = sidebarSelected === "__sol__"
+      ? activeShieldAddress
+      : getTokenDepositAddress(activeShieldAddress, sidebarSelected);
+    if (!addr) return;
+    setTxHistory([]);
+    setTxHistoryLoading(true);
+    fetch(`/api/qoin/tx-history?address=${encodeURIComponent(addr)}&limit=10`)
+      .then(r => r.json())
+      .then((d: typeof txHistory) => setTxHistory(Array.isArray(d) ? d : []))
+      .catch(() => setTxHistory([]))
+      .finally(() => setTxHistoryLoading(false));
+  }, [sidebarSelected, activeShieldAddress]);
+
   const fetchDexPrices = useCallback((mints: string[]) => {
     if (mints.length === 0) return;
     const query = mints.join(",");
-    fetch(`/api/storaqe/dex-price?mints=${encodeURIComponent(query)}`)
+    fetch(`/api/qoin/dex-price?mints=${encodeURIComponent(query)}`)
       .then((r) => r.json())
       .then((d: Record<string, { price: number; change24h: number | null }>) => {
         setDexPrices(d);
@@ -124,15 +157,26 @@ export default function AccessVault() {
   }, []);
 
   async function fetchBalance(addr: string): Promise<ShieldData> {
-    const res = await fetch(`/api/storaqe/balance?address=${encodeURIComponent(addr)}`);
+    const res = await fetch(`/api/qoin/balance?address=${encodeURIComponent(addr)}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to load balance.");
     return data as ShieldData;
   }
 
   async function handleView() {
-    const addr = shieldInput.trim();
-    if (!isValidPublicKey(addr)) { setError("Enter a valid Qoin address."); return; }
+    const raw = shieldInput.trim();
+    let addr = raw;
+    if (isValidPrivateKey(raw)) {
+      try {
+        addr = keypairFromPrivateKey(raw).publicKey.toBase58();
+      } catch {
+        setError("Invalid private key.");
+        return;
+      }
+    } else if (!isValidPublicKey(raw)) {
+      setError("Enter a Qoin address, Key 1, or Key 2.");
+      return;
+    }
     setError("");
     setShield(null);
     setDexPrices({});
@@ -141,6 +185,7 @@ export default function AccessVault() {
       const data = await fetchBalance(addr);
       setShield(data);
       setActiveShieldAddress(addr);
+      setShieldInput(addr);
       setSidebarSelected("__sol__");
       setActiveTab("receive");
       fetchChart("__sol__");
@@ -150,6 +195,29 @@ export default function AccessVault() {
       setError((e as Error).message || "Failed to load. Check the address.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleCreateTokenAccountSidebar() {
+    if (!activeShieldAddress || !customMint.trim() || !isValidPublicKey(customMint.trim())) return;
+    setCustomCreating(true);
+    setCustomTaError("");
+    setCustomTaSig("");
+    try {
+      const res = await fetch("/api/qoin/create-token-account", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ multisigAddress: activeShieldAddress, mintAddress: customMint.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to create token account.");
+      setCustomDepositAddr(data.tokenAccountAddress);
+      if (data.signature) setCustomTaSig(data.signature);
+      saveTokenDeposit(activeShieldAddress, customMint.trim(), data.tokenAccountAddress);
+    } catch (e: unknown) {
+      setCustomTaError((e as Error).message || "Failed to create token account.");
+    } finally {
+      setCustomCreating(false);
     }
   }
 
@@ -288,8 +356,11 @@ export default function AccessVault() {
         <div className="flex-1 flex flex-col items-center justify-center px-6">
           <SketchShield className="w-16 h-16 mb-6 opacity-20" />
           <h1 className="font-sketch text-4xl text-[#1a1a1a] mb-2">Open Your Qoin</h1>
-          <p className="font-handwritten text-base text-[#1a1a1a]/40 mb-8">
-            Enter your Qoin address to view your portfolio.
+          <p className="font-handwritten text-base text-[#1a1a1a]/40 mb-2">
+            Paste your Qoin address, Key 1, or Key 2.
+          </p>
+          <p className="font-handwritten text-sm text-[#1a1a1a]/25 mb-8">
+            Keys never leave your browser — address is derived locally.
           </p>
           <div className="w-full max-w-lg flex gap-3">
             <input
@@ -297,9 +368,12 @@ export default function AccessVault() {
               value={shieldInput}
               onChange={(e) => { setShieldInput(e.target.value); setError(""); }}
               onKeyDown={(e) => e.key === "Enter" && handleView()}
-              placeholder="Paste Qoin address here..."
+              placeholder="Qoin address, Key 1, or Key 2..."
               className="input-sketch flex-1 text-base py-4 font-mono"
               autoFocus
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
             />
             <button
               onClick={handleView}
@@ -420,6 +494,72 @@ export default function AccessVault() {
                     );
                   })}
                 </>
+              )}
+            </div>
+
+            {/* Add Token */}
+            <div className="border-t border-[#1a1a1a]/5 mt-2">
+              <button
+                onClick={() => { setShowAddToken(!showAddToken); setCustomMint(""); setCustomDepositAddr(""); }}
+                className="w-full flex items-center justify-center md:justify-start gap-2 px-2 md:px-4 py-2.5 hover:bg-[#FAFAF5] transition-all text-left"
+              >
+                <div className="w-9 h-9 rounded-full bg-[#1a1a1a]/5 flex items-center justify-center flex-shrink-0">
+                  <svg viewBox="0 0 16 16" fill="none" className="w-4 h-4">
+                    <path d="M8 3v10M3 8h10" stroke="#1a1a1a" strokeWidth="1.8" strokeLinecap="round" opacity="0.4"/>
+                  </svg>
+                </div>
+                <span className="hidden md:block font-handwritten text-sm text-[#1a1a1a]/40">Add Token</span>
+              </button>
+              {showAddToken && (
+                <div className="px-3 pb-3 space-y-2">
+                  <input
+                    type="text"
+                    value={customMint}
+                    onChange={(e) => {
+                      setCustomMint(e.target.value.trim());
+                      setCustomDepositAddr("");
+                      setCustomTaError("");
+                      setCustomTaSig("");
+                    }}
+                    placeholder="Paste mint address..."
+                    autoComplete="off"
+                    spellCheck={false}
+                    className="input-sketch text-xs py-2 font-mono w-full"
+                  />
+                  {customMint && !isValidPublicKey(customMint) && (
+                    <p className="font-handwritten text-xs text-[#1a1a1a]/30">Enter a valid token mint address.</p>
+                  )}
+                  {customTaError && (
+                    <p className="font-handwritten text-xs text-[#F7931A]">{customTaError}</p>
+                  )}
+                  {isValidPublicKey(customMint) && !customDepositAddr && (
+                    <button
+                      onClick={handleCreateTokenAccountSidebar}
+                      disabled={customCreating}
+                      className="w-full font-body font-bold text-xs py-2 border-2 border-[#1a1a1a] rounded-sm bg-white hover:bg-[#1a1a1a] hover:text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {customCreating ? "Creating..." : "Get Deposit Address"}
+                    </button>
+                  )}
+                  {customDepositAddr && (
+                    <div className="border border-[#1a1a1a]/10 rounded-sm p-2 bg-[#FAFAF5]">
+                      <div className="font-handwritten text-xs text-[#1a1a1a]/40 mb-1">
+                        Deposit address:{customTaSig && <span className="ml-1 text-[#F7931A]">Created on-chain.</span>}
+                      </div>
+                      <div className="font-mono text-xs text-[#1a1a1a] break-all mb-2">{customDepositAddr.slice(0, 22)}...</div>
+                      <button
+                        onClick={async () => {
+                          await navigator.clipboard.writeText(customDepositAddr);
+                          setCustomMintCopied(true);
+                          setTimeout(() => setCustomMintCopied(false), 2000);
+                        }}
+                        className="w-full font-body font-bold text-xs py-1.5 border border-[#1a1a1a]/20 rounded-sm hover:bg-[#F7931A] hover:text-white hover:border-[#F7931A] transition-all"
+                      >
+                        {customMintCopied ? "Copied!" : "Copy Address"}
+                      </button>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
 
@@ -579,16 +719,72 @@ export default function AccessVault() {
                     <div className="font-mono text-sm text-[#1a1a1a] break-all p-4 bg-[#FAFAF5] border border-[#1a1a1a]/10 rounded-sm">
                       {receiveAddr}
                     </div>
-                    <button
-                      onClick={async () => {
-                        await navigator.clipboard.writeText(receiveAddr);
-                        setCopiedAddr(sidebarSelected);
-                        setTimeout(() => setCopiedAddr(null), 2000);
-                      }}
-                      className="btn-sketch-outline w-full text-sm py-3 bg-white"
-                    >
-                      {copiedAddr === sidebarSelected ? "Copied!" : `Copy ${selLabel} Deposit Address`}
-                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={async () => {
+                          await navigator.clipboard.writeText(receiveAddr);
+                          setCopiedAddr(sidebarSelected);
+                          setTimeout(() => setCopiedAddr(null), 2000);
+                        }}
+                        className="btn-sketch-outline flex-1 text-sm py-3 bg-white"
+                      >
+                        {copiedAddr === sidebarSelected ? "Copied!" : `Copy ${selLabel} Address`}
+                      </button>
+                      <a
+                        href={explorerAddressUrl(receiveAddr, false)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-shrink-0 flex items-center gap-1.5 px-4 py-3 border-2 border-[#1a1a1a]/20 rounded-sm font-body font-bold text-sm text-[#1a1a1a]/60 hover:border-[#F7931A] hover:text-[#F7931A] transition-all bg-white"
+                      >
+                        <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M5.5 2H2a1 1 0 00-1 1v8a1 1 0 001 1h8a1 1 0 001-1V7.5M8 1h4m0 0v4m0-4L5.5 7.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                        Orb
+                      </a>
+                    </div>
+
+                    {/* Transaction history */}
+                    <div className="border-t border-[#1a1a1a]/10 pt-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="font-body font-bold text-xs text-[#1a1a1a]/40 uppercase tracking-wide">Recent Transactions</span>
+                        {txHistoryLoading && <span className="font-handwritten text-xs text-[#1a1a1a]/30">Loading...</span>}
+                      </div>
+                      {!txHistoryLoading && txHistory.length === 0 && (
+                        <p className="font-handwritten text-sm text-[#1a1a1a]/30 text-center py-3">No transactions yet.</p>
+                      )}
+                      <div className="space-y-1.5">
+                        {txHistory.map((tx) => {
+                          const tt = tx.tokenTransfers.find(t =>
+                            !selIsSOL && (t.to === receiveAddr || t.from === receiveAddr)
+                          );
+                          const nt = selIsSOL ? tx.nativeTransfers.find(t =>
+                            t.to === activeShieldAddress || t.from === activeShieldAddress
+                          ) : null;
+                          const isIn = tt ? tt.to === receiveAddr : nt ? nt.to === activeShieldAddress : null;
+                          const amt = tt
+                            ? `${tt.amount > 0 ? tt.amount.toLocaleString(undefined, { maximumFractionDigits: 4 }) : ""}`
+                            : nt ? `${(nt.lamports / 1e9).toLocaleString(undefined, { maximumFractionDigits: 4 })} SOL` : "";
+                          const date = new Date(tx.ts * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+                          return (
+                            <a
+                              key={tx.sig}
+                              href={explorerUrl(tx.sig, false)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-3 px-3 py-2.5 rounded-sm border border-[#1a1a1a]/8 hover:border-[#F7931A]/40 hover:bg-[#F7931A]/5 transition-all group"
+                            >
+                              <span className={`text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${tx.err ? "bg-red-100 text-red-500" : isIn === true ? "bg-green-100 text-green-600" : isIn === false ? "bg-[#F7931A]/10 text-[#F7931A]" : "bg-[#1a1a1a]/5 text-[#1a1a1a]/40"}`}>
+                                {tx.err ? "!" : isIn === true ? "↓" : isIn === false ? "↑" : "·"}
+                              </span>
+                              <div className="flex-1 min-w-0">
+                                <div className="font-mono text-xs text-[#1a1a1a] truncate">{tx.sig.slice(0, 18)}...</div>
+                                <div className="font-handwritten text-xs text-[#1a1a1a]/40">{date}</div>
+                              </div>
+                              {amt && <span className="font-body font-bold text-xs text-[#1a1a1a]/60 flex-shrink-0">{amt}</span>}
+                              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" className="flex-shrink-0 opacity-0 group-hover:opacity-40 transition-opacity"><path d="M1.5 1.5h7m0 0v7m0-7L1.5 8.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                            </a>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
                 )}
 
@@ -611,6 +807,9 @@ export default function AccessVault() {
                               placeholder="base58 private key..."
                               value={pk1}
                               onChange={(e) => setPk1(e.target.value)}
+                              autoComplete="off"
+                              autoCorrect="off"
+                              spellCheck={false}
                               className="input-sketch text-sm font-mono py-2 pr-16"
                             />
                             <button
@@ -629,6 +828,9 @@ export default function AccessVault() {
                               placeholder="base58 private key..."
                               value={pk2}
                               onChange={(e) => setPk2(e.target.value)}
+                              autoComplete="off"
+                              autoCorrect="off"
+                              spellCheck={false}
                               className="input-sketch text-sm font-mono py-2 pr-16"
                             />
                             <button
