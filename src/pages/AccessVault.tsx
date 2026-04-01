@@ -47,7 +47,7 @@ const POPULAR_TOKENS = [
 
 type TxRecord = {
   sig: string; ts: number;
-  tokenTransfers: Array<{ mint: string; from: string; to: string; amount: number }>;
+  tokenTransfers: Array<{ mint: string; from: string; to: string; fromAccount: string; toAccount: string; amount: number }>;
   nativeTransfers: Array<{ from: string; to: string; lamports: number }>;
   err: unknown;
 };
@@ -143,14 +143,22 @@ export default function AccessVault() {
     mint === "__sol__" ? shieldAddr : getTokenDepositAddress(shieldAddr, mint),
   []);
 
+  const buildTxUrl = useCallback((shieldAddr: string, mint: string, limit: number, before?: string): string => {
+    const addr = getTxAddr(shieldAddr, mint);
+    const base = `/api/qoin/tx-history?address=${encodeURIComponent(addr)}&limit=${limit}`;
+    const beforePart = before ? `&before=${encodeURIComponent(before)}` : "";
+    if (mint === "__sol__") return `${base}${beforePart}`;
+    const ownerPart = `&owner=${encodeURIComponent(shieldAddr)}&mint=${encodeURIComponent(mint)}`;
+    return `${base}${ownerPart}${beforePart}`;
+  }, [getTxAddr]);
+
   useEffect(() => {
     if (!activeShieldAddress) return;
-    const addr = getTxAddr(activeShieldAddress, sidebarSelected);
-    if (!addr) return;
+    const url = buildTxUrl(activeShieldAddress, sidebarSelected, PAGE_LIMIT);
     setTxHistory([]);
     setTxHistoryHasMore(false);
     setTxHistoryLoading(true);
-    fetch(`/api/qoin/tx-history?address=${encodeURIComponent(addr)}&limit=${PAGE_LIMIT}`)
+    fetch(url)
       .then(r => r.json())
       .then((d: TxRecord[]) => {
         const list = Array.isArray(d) ? d : [];
@@ -159,23 +167,22 @@ export default function AccessVault() {
       })
       .catch(() => setTxHistory([]))
       .finally(() => setTxHistoryLoading(false));
-  }, [sidebarSelected, activeShieldAddress, getTxAddr]);
+  }, [sidebarSelected, activeShieldAddress, buildTxUrl]);
 
   const loadMoreTxHistory = useCallback(async () => {
     if (!activeShieldAddress || txHistoryLoadingMore || txHistory.length === 0) return;
-    const addr = getTxAddr(activeShieldAddress, sidebarSelected);
-    if (!addr) return;
     const lastSig = txHistory[txHistory.length - 1].sig;
     setTxHistoryLoadingMore(true);
     try {
-      const r = await fetch(`/api/qoin/tx-history?address=${encodeURIComponent(addr)}&limit=${PAGE_LIMIT}&before=${encodeURIComponent(lastSig)}`);
+      const url = buildTxUrl(activeShieldAddress, sidebarSelected, PAGE_LIMIT, lastSig);
+      const r = await fetch(url);
       const d: TxRecord[] = await r.json();
       const list = Array.isArray(d) ? d : [];
       setTxHistory(prev => [...prev, ...list]);
       setTxHistoryHasMore(list.length === PAGE_LIMIT);
     } catch { /* ignore */ }
     finally { setTxHistoryLoadingMore(false); }
-  }, [activeShieldAddress, sidebarSelected, txHistory, txHistoryLoadingMore, getTxAddr]);
+  }, [activeShieldAddress, sidebarSelected, txHistory, txHistoryLoadingMore, buildTxUrl]);
 
   useEffect(() => {
     if (!activeShieldAddress) {
@@ -183,11 +190,10 @@ export default function AccessVault() {
       return;
     }
     const poll = async () => {
-      const addr = getTxAddr(activeShieldAddress, sidebarSelected);
-      if (!addr) return;
       try {
+        const pollUrl = buildTxUrl(activeShieldAddress, sidebarSelected, 1);
         const [txRes, balRes] = await Promise.all([
-          fetch(`/api/qoin/tx-history?address=${encodeURIComponent(addr)}&limit=1`),
+          fetch(pollUrl),
           fetch(`/api/qoin/balance?address=${encodeURIComponent(activeShieldAddress)}`),
         ]);
         const [latestList, balData] = await Promise.all([txRes.json(), balRes.json()]);
@@ -196,7 +202,7 @@ export default function AccessVault() {
             if (prev.length === 0 || latestList[0].sig !== prev[0].sig) {
               setNewDepositAlert(true);
               setTimeout(() => setNewDepositAlert(false), 6000);
-              fetch(`/api/qoin/tx-history?address=${encodeURIComponent(addr)}&limit=${PAGE_LIMIT}`)
+              fetch(buildTxUrl(activeShieldAddress, sidebarSelected, PAGE_LIMIT))
                 .then(r => r.json())
                 .then((d: TxRecord[]) => {
                   const list = Array.isArray(d) ? d : [];
@@ -989,16 +995,19 @@ export default function AccessVault() {
                 <div className="overflow-y-auto" style={{ maxHeight: "380px" }}>
                   {(() => {
                     const filtered = txHistory.filter((tx) => {
-                      const tt = tx.tokenTransfers.find(t =>
-                        !selIsSOL && (t.to === receiveAddr || t.from === receiveAddr)
-                      );
+                      const tt = !selIsSOL
+                        ? tx.tokenTransfers.find(t =>
+                            t.mint === sidebarSelected &&
+                            (t.to === activeShieldAddress || t.from === activeShieldAddress)
+                          )
+                        : null;
                       const nt = selIsSOL
                         ? tx.nativeTransfers.find(t =>
                             t.to === activeShieldAddress || t.from === activeShieldAddress
                           )
                         : null;
                       const isIn = tt
-                        ? tt.to === receiveAddr
+                        ? tt.to === activeShieldAddress
                         : nt
                           ? nt.to === activeShieldAddress
                           : null;
@@ -1019,15 +1028,18 @@ export default function AccessVault() {
                     return (
                       <div className="divide-y divide-[#1a1a1a]/6">
                         {filtered.map((tx) => {
-                          const tt = tx.tokenTransfers.find(t =>
-                            !selIsSOL && (t.to === receiveAddr || t.from === receiveAddr)
-                          );
+                          const tt = !selIsSOL
+                            ? tx.tokenTransfers.find(t =>
+                                t.mint === sidebarSelected &&
+                                (t.to === activeShieldAddress || t.from === activeShieldAddress)
+                              )
+                            : null;
                           const nt = selIsSOL
                             ? tx.nativeTransfers.find(t =>
                                 t.to === activeShieldAddress || t.from === activeShieldAddress
                               )
                             : null;
-                          const isIn = tt ? tt.to === receiveAddr : nt ? nt.to === activeShieldAddress : null;
+                          const isIn = tt ? tt.to === activeShieldAddress : nt ? nt.to === activeShieldAddress : null;
                           const amt = tt
                             ? tt.amount > 0
                               ? tt.amount.toLocaleString(undefined, { maximumFractionDigits: 6 })
