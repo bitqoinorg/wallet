@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useLocation } from "wouter";
 import { SketchCoin } from "@/components/sketches";
-import { useApp } from "@/contexts/AppContext";
+import { useApp, type Chain } from "@/contexts/AppContext";
 import { LANGUAGES } from "@/lib/translations";
 
 function SunIcon() {
@@ -113,6 +113,38 @@ function NavDropdown({ label, items, onNavigate, open, onOpen, onClose }: NavDro
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function ChainSelector() {
+  const { chain, setChain, dark } = useApp();
+
+  const chains: { id: Chain; label: string; title: string }[] = [
+    { id: "solana", label: "SOL", title: "Solana" },
+    { id: "evm",    label: "ETH", title: "Ethereum" },
+  ];
+
+  return (
+    <div className={`flex items-center border rounded-sm overflow-hidden text-xs font-body font-bold ${
+      dark ? "border-[#FAFAF5]/20" : "border-[#1a1a1a]/20"
+    }`}>
+      {chains.map((c) => (
+        <button
+          key={c.id}
+          onClick={() => setChain(c.id)}
+          title={c.title}
+          className={`px-2.5 py-1 transition-colors ${
+            chain === c.id
+              ? "bg-[#F7931A] text-white"
+              : dark
+                ? "text-[#FAFAF5]/50 hover:text-[#F7931A]"
+                : "text-[#1a1a1a]/40 hover:text-[#F7931A]"
+          }`}
+        >
+          {c.label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -244,6 +276,8 @@ export default function Navbar() {
           </div>
 
           <div className="hidden md:flex items-center gap-2 flex-shrink-0">
+            <ChainSelector />
+
             <LangPicker />
 
             <a
@@ -319,6 +353,7 @@ export default function Navbar() {
             </button>
 
             <div className={`flex items-center gap-3 pt-3 border-t ${dark ? "border-[#FAFAF5]/10" : "border-[#1a1a1a]/10"}`}>
+              <ChainSelector />
               <LangPicker />
               <a href="https://github.com/bitqoinorg" target="_blank" rel="noopener noreferrer"
                 className={`p-2 ${dark ? "text-[#FAFAF5]/60" : "text-[#1a1a1a]/50"}`}>
