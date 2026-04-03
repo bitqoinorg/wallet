@@ -1,12 +1,16 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
 import { type Language, type Translations, getTranslations } from "@/lib/translations";
 
+export type Chain = "solana" | "evm";
+
 interface AppContextType {
   lang: Language;
   setLang: (l: Language) => void;
   dark: boolean;
   toggleDark: () => void;
   t: Translations;
+  chain: Chain;
+  setChain: (c: Chain) => void;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -17,6 +21,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   });
   const [dark, setDark] = useState(() => {
     return localStorage.getItem("qoin_dark") === "true";
+  });
+  const [chain, setChainState] = useState<Chain>(() => {
+    return (localStorage.getItem("qoin_chain") as Chain) ?? "solana";
   });
 
   useEffect(() => {
@@ -34,6 +41,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     localStorage.setItem("qoin_lang", lang);
   }, [lang]);
 
+  useEffect(() => {
+    localStorage.setItem("qoin_chain", chain);
+  }, [chain]);
+
   function setLang(l: Language) {
     setLangState(l);
   }
@@ -42,10 +53,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setDark((v) => !v);
   }
 
+  function setChain(c: Chain) {
+    setChainState(c);
+  }
+
   const t = getTranslations(lang);
 
   return (
-    <AppContext.Provider value={{ lang, setLang, dark, toggleDark, t }}>
+    <AppContext.Provider value={{ lang, setLang, dark, toggleDark, t, chain, setChain }}>
       {children}
     </AppContext.Provider>
   );
