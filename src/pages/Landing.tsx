@@ -28,7 +28,7 @@ export default function Landing() {
     setTreasuryLoading(true);
     setTreasuryError("");
     try {
-      const res = await fetch(`/api/storaqe/balance?address=${TREASURY_VAULT}`);
+      const res = await fetch(`/api/qoin/balance?address=${TREASURY_VAULT}`);
       if (!res.ok) throw new Error("API error");
       const data = await res.json() as { solBalance: number; tokens: Array<{ mint: string; balance: number; name: string | null; symbol: string | null; logo: string | null }> };
       setTreasurySol(data.solBalance);
@@ -460,7 +460,7 @@ export default function Landing() {
           <p className="font-handwritten text-base text-white/30 text-center max-w-md">
             This is a memecoin. We are not financial advisors. We are, however, very enthusiastic about cryptography and making it very hard for people to steal things. DYOR. Not financial advice.
           </p>
-          <div className="font-handwritten text-base text-white/20">Built on Solana</div>
+          <div className="font-handwritten text-base text-white/20">Solana + Ethereum</div>
         </div>
       </footer>
     </div>
