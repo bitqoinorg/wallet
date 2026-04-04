@@ -333,7 +333,7 @@ export default function GenerateVault() {
                         <div className="px-4 py-3">
                           {evmAddress1 ? (
                             <div className="flex items-center gap-2">
-                              <span className="text-sm">🦊</span>
+                              <img src="/metamask-logo.png" className="w-5 h-5 rounded-lg flex-shrink-0" alt="MetaMask" />
                               <span className="font-mono text-xs text-[#1a1a1a]/60 break-all">{evmAddress1}</span>
                             </div>
                           ) : (
@@ -363,7 +363,7 @@ export default function GenerateVault() {
                         <div className="px-4 py-3">
                           {evmAddress2 ? (
                             <div className="flex items-center gap-2">
-                              <span className="text-sm">🦊</span>
+                              <img src="/metamask-logo.png" className="w-5 h-5 rounded-lg flex-shrink-0" alt="MetaMask" />
                               <span className="font-mono text-xs text-[#1a1a1a]/60 break-all">{evmAddress2}</span>
                             </div>
                           ) : (
@@ -755,14 +755,14 @@ export default function GenerateVault() {
                         <>
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
-                              <span className="text-sm">🦊</span>
+                              <img src="/metamask-logo.png" className="w-7 h-7 rounded-xl flex-shrink-0" alt="MetaMask" />
                               <span className="font-body font-bold text-sm text-[#1a1a1a]/50">Key 1 (MetaMask)</span>
                             </div>
                             <span className="font-mono text-xs text-[#F7931A]">{evmAddress1 ? `${evmAddress1.slice(0, 8)}...${evmAddress1.slice(-6)}` : "n/a"}</span>
                           </div>
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
-                              <span className="text-sm">🦊</span>
+                              <img src="/metamask-logo.png" className="w-7 h-7 rounded-xl flex-shrink-0" alt="MetaMask" />
                               <span className="font-body font-bold text-sm text-[#1a1a1a]/50">Key 2 (MetaMask)</span>
                             </div>
                             <span className="font-mono text-xs text-[#F7931A]">{evmAddress2 ? `${evmAddress2.slice(0, 8)}...${evmAddress2.slice(-6)}` : "n/a"}</span>
