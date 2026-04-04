@@ -109,7 +109,7 @@ export default function GenerateVault() {
   async function handleCreateWithWallets() {
     if (!phantomPubkey || !phantom2Pubkey) return;
     if (phantomPubkey === phantom2Pubkey) {
-      setError("Key 1 and Key 2 must be different Phantom accounts.");
+      setError("Key 1 and Key 2 must be different accounts.");
       return;
     }
     await callCreateApi(phantomPubkey, phantom2Pubkey);
@@ -400,7 +400,7 @@ export default function GenerateVault() {
                   ) : (
                     <>
                       <p className="font-handwritten text-sm text-[#1a1a1a]/40">
-                        Connect Phantom as Key 1, switch accounts in the extension, then connect as Key 2. Both public keys register on-chain as Qonjoint signers.
+                        Connect Phantom as Key 1 and Solflare as Key 2. Both public keys register on-chain as Qonjoint signers.
                       </p>
 
                       {/* Key 1 — Phantom */}
@@ -432,12 +432,12 @@ export default function GenerateVault() {
                         </div>
                       </div>
 
-                      {/* Key 2 — Phantom (second account) */}
+                      {/* Key 2 — Solflare */}
                       <div className="border-2 border-[#1a1a1a] rounded-sm overflow-hidden">
                         <div className="flex items-center justify-between px-4 py-3 border-b border-[#1a1a1a]/10 bg-[#FAFAF5]">
                           <div className="flex items-center gap-2">
-                            <img src="/phantom-logo.png" className="w-8 h-8 rounded-xl flex-shrink-0" style={{ opacity: phantom2Pubkey ? 1 : 0.6 }} alt="Phantom K2" />
-                            <span className="font-body font-bold text-sm text-[#1a1a1a]">Key 2 (Phantom — switch account first)</span>
+                            <img src="/solflare-logo.png" className="w-8 h-8 rounded-xl flex-shrink-0" style={{ opacity: phantom2Pubkey ? 1 : 0.6 }} alt="Solflare" />
+                            <span className="font-body font-bold text-sm text-[#1a1a1a]">Key 2 (Solflare)</span>
                           </div>
                           {phantom2Pubkey && (
                             <span className="font-mono text-xs text-[#1a1a1a]/40">{phantom2Pubkey.slice(0, 6)}...{phantom2Pubkey.slice(-4)}</span>
@@ -448,7 +448,7 @@ export default function GenerateVault() {
                           {!phantomPubkey && <p className="font-handwritten text-xs text-[#1a1a1a]/30 mb-2">Connect Key 1 first.</p>}
                           {phantom2Pubkey ? (
                             <button onClick={disconnectPhantom2} className="w-full font-body font-bold text-xs py-2 border border-[#1a1a1a]/20 rounded-sm hover:bg-[#FAFAF5] transition-all">
-                              Disconnect Phantom (K2)
+                              Disconnect Solflare (K2)
                             </button>
                           ) : (
                             <button
@@ -456,11 +456,11 @@ export default function GenerateVault() {
                               disabled={phantom2Connecting || !phantomPubkey}
                               className="w-full font-body font-bold text-sm py-2.5 border-2 border-[#1a1a1a] rounded-sm bg-white hover:bg-[#1a1a1a] hover:text-white transition-all disabled:opacity-40"
                             >
-                              {phantom2Connecting ? "Connecting..." : "Connect Phantom (Key 2)"}
+                              {phantom2Connecting ? "Connecting..." : "Connect Solflare (Key 2)"}
                             </button>
                           )}
                           {!phantom2Pubkey && phantomPubkey && (
-                            <p className="font-handwritten text-xs text-[#1a1a1a]/30 mt-1.5">Switch to your second Phantom account in the extension first.</p>
+                            <p className="font-handwritten text-xs text-[#1a1a1a]/30 mt-1.5">Open Solflare extension and connect as Key 2.</p>
                           )}
                         </div>
                       </div>
@@ -703,7 +703,7 @@ export default function GenerateVault() {
                   />
                   <span className="font-body text-sm font-semibold text-[#1a1a1a] group-hover:text-[#F7931A] transition-colors">
                     {createMode === "cold-keys"
-                      ? "I have saved all three — Key 1, Key 2, and my Qoin address — in a safe place."
+                      ? "I have saved all three: Key 1, Key 2, and my Qoin address, in a safe place."
                       : "I have saved my Qoin address in a safe place."}
                   </span>
                 </label>
@@ -746,12 +746,12 @@ export default function GenerateVault() {
                       </button>
                       {chain === "evm" ? (
                         <a
-                          href={`https://etherscan.io/tx/${evmVaultTxHash}`}
+                          href={`https://blockchair.com/ethereum/transaction/${evmVaultTxHash}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="btn-sketch flex-1 text-base py-3 text-center"
                         >
-                          View on Etherscan
+                          View on Blockchair
                         </a>
                       ) : (
                         <a
@@ -834,8 +834,8 @@ export default function GenerateVault() {
                           </div>
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
-                              <img src="/phantom-logo.png" className="w-7 h-7 rounded-xl flex-shrink-0" alt="Phantom K2" />
-                              <span className="font-body font-bold text-sm text-[#1a1a1a]/50">Key 2 (Phantom)</span>
+                              <img src="/solflare-logo.png" className="w-7 h-7 rounded-xl flex-shrink-0" alt="Solflare" />
+                              <span className="font-body font-bold text-sm text-[#1a1a1a]/50">Key 2 (Solflare)</span>
                             </div>
                             <span className="font-mono text-xs text-[#F7931A]">{phantom2Pubkey ? `${phantom2Pubkey.slice(0, 8)}...${phantom2Pubkey.slice(-6)}` : "n/a"}</span>
                           </div>
@@ -860,7 +860,7 @@ export default function GenerateVault() {
                         {createMode === "cold-keys"
                           ? "Save Key 1, Key 2, and the Qoin Address. All three. We do not store any of this. Losing them means losing your tokens permanently."
                           : chain === "evm"
-                          ? "Save the Vault Address. Both MetaMask keys must be available to sign any transfer. Losing access to either means losing your tokens permanently."
+                          ? "Save the Qoin Address. Both MetaMask keys must be available to sign any transfer. Losing access to either means losing your tokens permanently."
                           : "Save the Qoin Address. Both Phantom accounts must be available to sign any transfer. Losing access to either means losing your tokens permanently."}
                       </p>
                     </div>
