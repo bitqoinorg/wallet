@@ -822,7 +822,7 @@ export default function AccessVault() {
               <div className="border-2 border-[#1a1a1a] rounded-sm overflow-hidden">
                 <div className="flex items-center justify-between px-4 py-3 border-b border-[#1a1a1a]/10 bg-[#FAFAF5]">
                   <div className="flex items-center gap-2">
-                    <span className="text-xl">🦊</span>
+                    <img src="/metamask-logo.png" className="w-8 h-8 rounded-xl flex-shrink-0" alt="MetaMask" />
                     <span className="font-body font-bold text-sm text-[#1a1a1a]">Key 1 (MetaMask)</span>
                   </div>
                   {evmAddress1 && (
@@ -851,7 +851,7 @@ export default function AccessVault() {
               <div className="border-2 border-[#1a1a1a] rounded-sm overflow-hidden">
                 <div className="flex items-center justify-between px-4 py-3 border-b border-[#1a1a1a]/10 bg-[#FAFAF5]">
                   <div className="flex items-center gap-2">
-                    <span className="text-xl">🦊</span>
+                    <img src="/metamask-logo.png" className="w-8 h-8 rounded-xl flex-shrink-0" alt="MetaMask" />
                     <span className="font-body font-bold text-sm text-[#1a1a1a]">Key 2 (MetaMask)</span>
                   </div>
                   {evmAddress2 && (
@@ -1139,13 +1139,13 @@ export default function AccessVault() {
                   <div className="font-handwritten text-xs text-[#1a1a1a]/40 uppercase tracking-widest">Co-signers connected</div>
                   {evmAddress1 && (
                     <div className="flex items-center gap-2">
-                      <span className="text-sm">🦊</span>
+                      <img src="/metamask-logo.png" className="w-5 h-5 rounded-lg flex-shrink-0" alt="MetaMask" />
                       <span className="font-mono text-xs text-[#1a1a1a]/60">K1: {evmAddress1.slice(0, 10)}...{evmAddress1.slice(-6)}</span>
                     </div>
                   )}
                   {evmAddress2 && (
                     <div className="flex items-center gap-2">
-                      <span className="text-sm">🦊</span>
+                      <img src="/metamask-logo.png" className="w-5 h-5 rounded-lg flex-shrink-0" alt="MetaMask" />
                       <span className="font-mono text-xs text-[#1a1a1a]/60">K2: {evmAddress2.slice(0, 10)}...{evmAddress2.slice(-6)}</span>
                     </div>
                   )}
