@@ -320,6 +320,11 @@ export default function AccessVault() {
     return () => { if (pollingRef.current) clearInterval(pollingRef.current); };
   }, [activeShieldAddress, sidebarSelected, getTxAddr]);
 
+  const selHeldForSync = shield?.tokens.find((t) => t.mint === sidebarSelected) ?? null;
+  useEffect(() => {
+    if (selHeldForSync) setSelectedToken(selHeldForSync);
+  }, [selHeldForSync]);
+
   const fetchDexPrices = useCallback((mints: string[]) => {
     if (mints.length === 0) return;
     const query = mints.join(",");
