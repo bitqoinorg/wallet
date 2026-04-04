@@ -113,7 +113,7 @@ const en: Translations = {
     ],
   },
   hero: {
-    line1: "The World's First", line2: 'Quantum-Proof', line3: 'Shield for Your Coins',
+    line1: "The World's First", line2: 'Quantum-Resistant', line3: 'Shield for Your Coins',
     body: 'When people still store every memecoin, every ERC-20, every SPL token in a single wallet, one leaked private key and poof, gone forever. We said no thanks, and built Qoin instead.',
     handwritten: 'Both keys must sign. No exceptions. Not negotiable. The math said so.',
     ctaCreate: 'Create Your Qoin', ctaOpen: 'Open Your Qoin', ctaHow: 'How it works',
@@ -161,7 +161,7 @@ const en: Translations = {
     badge: 'Common Questions', title: 'FAQ',
     items: [
       { q: 'What happens if I lose one key?', a: 'Your tokens are locked until all keys are present. This is a feature, not a bug. Store each key in a different physical location. Both are required. If you lose one permanently, the tokens are inaccessible. Plan accordingly.' },
-      { q: 'Is this quantum-proof?', a: "Multi-key protection means that even if a quantum computer derives one private key from its public key using Shor's Algorithm, it still cannot move anything. Both keys must sign. One compromised key achieves nothing." },
+      { q: 'Is this quantum-resistant?', a: "Multi-key protection means that even if a quantum computer derives one private key from its public key using Shor's Algorithm, it still cannot move anything. Both keys must sign. One compromised key achieves nothing." },
       { q: 'Do you have access to my tokens?', a: 'No. Keys are generated locally in your browser and never transmitted to any server. We have no access to your keys or your tokens. Zero.' },
       { q: 'What tokens can I protect?', a: 'Any SPL token on Solana, or any ERC-20 token on Ethereum. Memecoins, stablecoins, NFTs, anything. If it lives on-chain, it can be held in a Qoin.' },
       { q: 'Do I need SOL for gas fees?', a: 'No. BITQ covers all gas fees during beta. Create and use your Qoin for free, no SOL or ETH needed for transactions.' },
