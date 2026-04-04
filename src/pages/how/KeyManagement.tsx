@@ -173,7 +173,7 @@ export default function KeyManagement() {
               {[
                 "Write the full private key string clearly, no abbreviations",
                 "Note which key is Key 1 and which is Key 2",
-                "Write your vault address alongside for reference",
+                "Write your Qoin address alongside for reference",
                 "Test that you can read the written key clearly",
                 "Verify the key works before depositing real funds",
               ].map((item, i) => (
