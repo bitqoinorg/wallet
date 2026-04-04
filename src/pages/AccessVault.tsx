@@ -966,7 +966,7 @@ export default function AccessVault() {
               <div className="text-center pt-1">
                 <button
                   onClick={() => { setShowDirectAddr(v => !v); setError(""); }}
-                  className="font-handwritten text-xs text-[#1a1a1a]/30 hover:text-[#F7931A] transition-all"
+                  className="font-handwritten text-sm text-[#1a1a1a]/50 hover:text-[#F7931A] transition-all"
                 >
                   {showDirectAddr ? "Hide direct entry" : "Have your Qoin address? Enter directly →"}
                 </button>
@@ -1105,7 +1105,7 @@ export default function AccessVault() {
           )}
           <button
             onClick={() => navigate("/qoin/create")}
-            className="font-handwritten text-sm text-[#1a1a1a]/30 hover:text-[#F7931A] transition-colors mt-8"
+            className="font-handwritten text-base text-[#1a1a1a]/50 hover:text-[#F7931A] transition-colors mt-8"
           >
             Don't have a Qoin? Create one →
           </button>
