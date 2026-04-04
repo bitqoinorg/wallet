@@ -13,7 +13,7 @@ import {
 import {
   SketchCheckmark, SketchX, SketchShield, SketchTwoKeys,
 } from "@/components/sketches";
-import { lookupVaultByPublicKey, saveTokenDeposit } from "@/lib/vaultStore";
+import { lookupVaultByPublicKey, saveTokenDeposit, lookupEvmVaultByAddress } from "@/lib/vaultStore";
 import { useApp } from "@/contexts/AppContext";
 import { useWalletPair } from "@/contexts/WalletPairContext";
 import { useEvmWallet } from "@/contexts/EvmWalletContext";
@@ -117,6 +117,7 @@ export default function AccessVault() {
   const [selectedToken, setSelectedToken] = useState<TokenBalance | null>(null);
 
   const [evmAddressInput, setEvmAddressInput] = useState("");
+  const [evmConnectVaultInput, setEvmConnectVaultInput] = useState("");
   const [evmLoading, setEvmLoading] = useState(false);
   const [evmError, setEvmError] = useState("");
   const [evmShield, setEvmShield] = useState<{ ethBalance: number; tokens: Array<{ contract: string; name: string; symbol: string; decimals: number; logo: string; balance: number }> } | null>(null);
@@ -196,6 +197,14 @@ export default function AccessVault() {
       })
       .catch(() => setLoading(false));
   }, [phantomPubkey, solflarePubkey, phantom2Pubkey, walletCombo, accessMode]);
+
+  useEffect(() => {
+    if (!evmAddress1 || accessMode !== "connect-wallets") return;
+    const cached = lookupEvmVaultByAddress(evmAddress1);
+    if (cached && !evmConnectVaultInput) {
+      setEvmConnectVaultInput(cached.vaultAddress);
+    }
+  }, [evmAddress1, accessMode]);
 
   useEffect(() => {
     const mints = POPULAR_TOKENS.map((t) => t.mint).join(",");
@@ -358,20 +367,28 @@ export default function AccessVault() {
   }
 
   async function handleEvmViewWallets() {
-    const addr = evmAddress1?.trim() ?? "";
-    if (!addr || !/^0x[0-9a-fA-F]{40}$/.test(addr)) {
+    if (!evmAddress1) {
       setEvmError("Connect MetaMask Key 1 first.");
+      return;
+    }
+    let vaultAddr = evmConnectVaultInput.trim();
+    if (!vaultAddr) {
+      const cached = lookupEvmVaultByAddress(evmAddress1);
+      if (cached) vaultAddr = cached.vaultAddress;
+    }
+    if (!vaultAddr || !/^0x[0-9a-fA-F]{40}$/.test(vaultAddr)) {
+      setEvmError("Enter your Vault address below, or create a vault first.");
       return;
     }
     setEvmError("");
     setEvmShield(null);
     setEvmLoading(true);
     try {
-      const data = await fetchEvmBalance(addr);
+      const data = await fetchEvmBalance(vaultAddr);
       setEvmShield(data);
-      setEvmActiveAddress(addr);
+      setEvmActiveAddress(vaultAddr);
     } catch (e: unknown) {
-      setEvmError((e as Error).message || "Failed to load. Check the address.");
+      setEvmError((e as Error).message || "Failed to load. Check the vault address.");
     } finally {
       setEvmLoading(false);
     }
@@ -849,12 +866,37 @@ export default function AccessVault() {
                 </div>
               </div>
 
+              {/* Vault address input — auto-filled from localStorage if known */}
+              <div>
+                <label className="font-handwritten text-xs text-[#1a1a1a]/40 uppercase tracking-widest block mb-1.5">
+                  Vault Address
+                </label>
+                <input
+                  type="text"
+                  placeholder="0x... (your Qonjoint Vault)"
+                  value={evmConnectVaultInput}
+                  onChange={(e) => { setEvmConnectVaultInput(e.target.value); setEvmError(""); }}
+                  className="input-sketch w-full text-sm py-3 font-mono"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                {!evmConnectVaultInput && evmAddress1 && (
+                  <p className="font-handwritten text-xs text-[#1a1a1a]/30 mt-1">
+                    No saved vault found for this key. Paste your Vault address above, or{" "}
+                    <button type="button" className="text-[#F7931A] underline" onClick={() => navigate("/qoin/create")}>create one</button>.
+                  </p>
+                )}
+                {evmConnectVaultInput && !/^0x[0-9a-fA-F]{40}$/.test(evmConnectVaultInput.trim()) && (
+                  <p className="font-handwritten text-xs text-red-500 mt-1">Invalid EVM address format.</p>
+                )}
+              </div>
+
               <button
                 onClick={handleEvmViewWallets}
-                disabled={evmLoading || !evmAddress1}
+                disabled={evmLoading || !evmAddress1 || (!!evmConnectVaultInput && !/^0x[0-9a-fA-F]{40}$/.test(evmConnectVaultInput.trim()))}
                 className="btn-sketch w-full py-3.5 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                {evmLoading ? "Loading..." : evmAddress1 ? `View ${evmAddress1.slice(0, 6)}...${evmAddress1.slice(-4)}` : "Connect Key 1 first"}
+                {evmLoading ? "Loading..." : !evmAddress1 ? "Connect Key 1 first" : "Open Vault"}
               </button>
               {evmError && <p className="font-handwritten text-sm text-[#F7931A]">{evmError}</p>}
             </div>
