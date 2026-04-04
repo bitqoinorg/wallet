@@ -460,7 +460,10 @@ export default function Landing() {
           <p className="font-handwritten text-base text-white/30 text-center max-w-md">
             This is a memecoin. We are not financial advisors. We are, however, very enthusiastic about cryptography and making it very hard for people to steal things. DYOR. Not financial advice.
           </p>
-          <div className="font-handwritten text-base text-white/20">Solana + Ethereum</div>
+          <div className="flex items-center gap-4">
+            <a href="https://github.com/bitqoinorg" target="_blank" rel="noopener noreferrer" className="font-handwritten text-base text-white/30 hover:text-[#F7931A] transition-colors">GitHub</a>
+            <a href="https://x.com/thebitcoin" target="_blank" rel="noopener noreferrer" className="font-body font-bold text-sm text-white/30 hover:text-[#F7931A] transition-colors">𝕏</a>
+          </div>
         </div>
       </footer>
     </div>
