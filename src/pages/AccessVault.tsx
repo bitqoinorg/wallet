@@ -38,6 +38,8 @@ interface TokenBalance {
   balance: number;
   decimals: number;
   tokenAccount: string;
+  authority: string;
+  isLocked: boolean;
   pricePerToken: number | null;
   isNft: boolean;
 }
@@ -118,6 +120,9 @@ export default function AccessVault() {
   const [evmAddressInput, setEvmAddressInput] = useState("");
   const [evmConnectVaultInput, setEvmConnectVaultInput] = useState("");
   const [evmLoading, setEvmLoading] = useState(false);
+  const [slotsLoading, setSlotsLoading] = useState(false);
+  const [slotsDone, setSlotsDone] = useState(false);
+  const [slotsError, setSlotsError] = useState("");
   const [evmError, setEvmError] = useState("");
   const [evmShield, setEvmShield] = useState<{ ethBalance: number; tokens: Array<{ contract: string; name: string; symbol: string; decimals: number; logo: string; balance: number }> } | null>(null);
   const [evmActiveAddress, setEvmActiveAddress] = useState("");
@@ -467,6 +472,30 @@ export default function AccessVault() {
       setError((e as Error).message || "Qoin not found.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleSetupSlots() {
+    if (!activeShieldAddress) return;
+    setSlotsLoading(true);
+    setSlotsError("");
+    setSlotsDone(false);
+    try {
+      const res = await fetch("/api/qoin/init-all-slots", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ multisigAddress: activeShieldAddress }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to setup slots.");
+      setSlotsDone(true);
+      // Refresh balance after setup
+      const updated = await fetchBalance(activeShieldAddress);
+      setShield(updated);
+    } catch (e: unknown) {
+      setSlotsError((e as Error).message || "Failed to setup slots.");
+    } finally {
+      setSlotsLoading(false);
     }
   }
 
@@ -1512,9 +1541,12 @@ export default function AccessVault() {
                         <span className="font-body font-bold text-sm text-[#1a1a1a] truncate leading-none">{t.mint === WSOL_MINT ? "wSOL" : (t.symbol ?? t.name?.slice(0, 8) ?? "Token")}</span>
                         {price && !t.isNft && <span className="font-mono text-xs text-[#F7931A] flex-shrink-0">{fmtPrice(price)}</span>}
                       </div>
-                      <div className="font-mono text-xs text-[#1a1a1a]/50 mt-0.5">{t.isNft ? "NFT" : fmtBalance(t.balance)}</div>
+                      <div className="font-mono text-xs text-[#1a1a1a]/50 mt-0.5 flex items-center gap-1.5">
+                        {t.isNft ? "NFT" : fmtBalance(t.balance)}
+                        {t.isLocked && <span className="font-body text-[10px] font-bold px-1 py-0 border border-[#F7931A] text-[#F7931A] rounded leading-4">Locked</span>}
+                      </div>
                     </div>
-                    {tdex?.change24h != null && !t.isNft && (
+                    {tdex?.change24h != null && !t.isNft && !t.isLocked && (
                       <span className="hidden md:inline font-mono text-xs flex-shrink-0" style={{ color: tdex.change24h >= 0 ? "#F7931A" : "#1a1a1a", opacity: tdex.change24h >= 0 ? 1 : 0.5 }}>
                         {tdex.change24h >= 0 ? "+" : ""}{tdex.change24h.toFixed(1)}%
                       </span>
@@ -1526,6 +1558,29 @@ export default function AccessVault() {
               {shield.tokens.length === 0 && (
                 <div className="hidden md:block px-4 py-3">
                   <p className="font-handwritten text-sm text-[#1a1a1a]/40">{t.access.noBalance}</p>
+                </div>
+              )}
+
+              {/* Setup Slots banner — shown when there are locked tokens or no tokens at all */}
+              {activeShieldAddress && (shield.tokens.some(tk => tk.isLocked) || shield.tokens.length === 0) && !slotsDone && (
+                <div className="hidden md:block mx-3 mb-2 mt-1 border-2 border-[#F7931A]/50 bg-[#FFF8F0] rounded-sm p-3 space-y-2">
+                  <p className="font-body font-bold text-xs text-[#1a1a1a]">Setup Token Slots</p>
+                  <p className="font-handwritten text-xs text-[#1a1a1a]/60 leading-relaxed">
+                    Initialize deposit slots for popular tokens. Required before deposits can be sent from this Qoin.
+                  </p>
+                  {slotsError && <p className="font-handwritten text-xs text-[#F7931A]">{slotsError}</p>}
+                  <button
+                    onClick={handleSetupSlots}
+                    disabled={slotsLoading}
+                    className="w-full font-body font-bold text-xs py-1.5 border-2 border-[#F7931A] text-[#F7931A] rounded-sm hover:bg-[#F7931A] hover:text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {slotsLoading ? "Setting up..." : "Setup Slots (Free)"}
+                  </button>
+                </div>
+              )}
+              {slotsDone && (
+                <div className="hidden md:block mx-3 mb-2 mt-1 border border-[#1a1a1a]/10 bg-[#FAFAF5] rounded-sm px-3 py-2">
+                  <p className="font-handwritten text-xs text-[#1a1a1a]/60">Slots ready. Deposits to this Qoin are now sendable.</p>
                 </div>
               )}
 
@@ -1629,21 +1684,26 @@ export default function AccessVault() {
                     <p className="font-handwritten text-xs text-[#F7931A]">{customTaError}</p>
                   )}
                   {isValidPublicKey(customMint) && customMint !== WSOL_MINT && !customDepositAddr && (
-
-                    <button
-                      onClick={handleCreateTokenAccountSidebar}
-                      disabled={customCreating}
-                      className="w-full font-body font-bold text-xs py-2 border-2 border-[#1a1a1a] rounded-sm bg-white hover:bg-[#1a1a1a] hover:text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      {customCreating ? "Creating..." : "Get Receive Address"}
-                    </button>
+                    <div className="space-y-1.5">
+                      <p className="font-handwritten text-xs text-[#1a1a1a]/50 leading-relaxed">
+                        This creates the deposit slot on-chain. Must be done before anyone sends this token to your Qoin.
+                      </p>
+                      <button
+                        onClick={handleCreateTokenAccountSidebar}
+                        disabled={customCreating}
+                        className="w-full font-body font-bold text-xs py-2 border-2 border-[#1a1a1a] rounded-sm bg-white hover:bg-[#1a1a1a] hover:text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {customCreating ? "Opening Slot..." : "Open Slot + Get Address"}
+                      </button>
+                    </div>
                   )}
                   {customDepositAddr && (
-                    <div className="border border-[#1a1a1a]/10 rounded-sm p-2 bg-[#FAFAF5]">
-                      <div className="font-handwritten text-xs text-[#1a1a1a]/40 mb-1">
-                        Receive address:{customTaSig && <span className="ml-1 text-[#F7931A]">Created on-chain.</span>}
+                    <div className="border-2 border-[#1a1a1a]/10 rounded-sm p-2 bg-[#FAFAF5]">
+                      <div className="font-handwritten text-xs text-[#1a1a1a]/50 mb-1.5 flex items-center gap-1.5">
+                        Slot ready. Deposit address:
+                        {customTaSig && <span className="text-[#F7931A] font-bold">On-chain.</span>}
                       </div>
-                      <div className="font-mono text-xs text-[#1a1a1a] break-all mb-2">{customDepositAddr.slice(0, 22)}...</div>
+                      <div className="font-mono text-xs text-[#1a1a1a] break-all mb-2">{customDepositAddr}</div>
                       <button
                         onClick={async () => {
                           await navigator.clipboard.writeText(customDepositAddr);
@@ -1652,7 +1712,7 @@ export default function AccessVault() {
                         }}
                         className="w-full font-body font-bold text-xs py-1.5 border border-[#1a1a1a]/20 rounded-sm hover:bg-[#F7931A] hover:text-white hover:border-[#F7931A] transition-all"
                       >
-                        {customMintCopied ? "Copied!" : "Copy Address"}
+                        {customMintCopied ? "Copied!" : "Copy Deposit Address"}
                       </button>
                     </div>
                   )}
@@ -1684,7 +1744,10 @@ export default function AccessVault() {
                   </div>
                 )}
                 <div className="flex-1 min-w-0">
-                  <div className="font-sketch text-3xl text-[#1a1a1a] leading-none">{selLabel}</div>
+                  <div className="flex items-center gap-2">
+                    <div className="font-sketch text-3xl text-[#1a1a1a] leading-none">{selLabel}</div>
+                    {selHeld?.isLocked && <span className="font-body text-xs font-bold px-1.5 py-0.5 border border-[#F7931A] text-[#F7931A] rounded">Locked</span>}
+                  </div>
                   <div className="font-sketch text-xl mt-0.5 leading-none" style={{ color: selHeld && selHeld.balance > 0 ? "#F7931A" : "#1a1a1a", opacity: selHeld && selHeld.balance > 0 ? 1 : 0.3 }}>
                     {selHeld ? fmtBalance(selHeld.balance) : "0.00"} {selLabel}
                   </div>
@@ -1959,6 +2022,11 @@ export default function AccessVault() {
                               <p className="font-handwritten text-sm text-[#1a1a1a]/60 mt-1">Exceeds balance</p>
                             )}
                           </div>
+                          {selHeld?.isLocked && (
+                            <div className="border-2 border-[#F7931A] bg-[#FFF8F0] rounded-sm p-3 font-body text-sm text-[#1a1a1a]/80 leading-relaxed">
+                              <span className="font-bold">Cannot send.</span> This token was deposited to a nested account before the Qoin token slot was initialized. The token is held read-only. To receive sendable tokens, use the deposit address for this token going forward.
+                            </div>
+                          )}
                           {txError && <div className="border-2 border-[#F7931A] bg-white rounded-sm p-3 font-body text-sm text-[#1a1a1a]/70">{txError}</div>}
                           {txSig && (
                             <div className="border-2 border-[#1a1a1a] bg-white rounded-sm p-4 shadow-[3px_3px_0_#1a1a1a]">
@@ -1969,17 +2037,19 @@ export default function AccessVault() {
                           )}
                           <button
                             onClick={accessMode === "connect-wallets" ? handleTransferWallets : handleTransfer}
-                            disabled={!canSend || !selHeld || txLoading || !recipient || !amount || !isValidPublicKey(recipient) || parseFloat(amount) <= 0 || parseFloat(amount) > (selHeld?.balance ?? 0)}
+                            disabled={!canSend || !selHeld || selHeld?.isLocked || txLoading || !recipient || !amount || !isValidPublicKey(recipient) || parseFloat(amount) <= 0 || parseFloat(amount) > (selHeld?.balance ?? 0)}
                             className="btn-sketch w-full py-3.5 text-base disabled:opacity-30 disabled:cursor-not-allowed"
                           >
-                            {!canSend
-                              ? (accessMode === "connect-wallets" ? "Connect both wallets to send" : "Load both cold keys above to send")
-                              : txLoading
-                                ? signingStep === "phantom" ? "Step 1/2: Approve in Phantom..."
-                                : signingStep === "solflare" ? "Step 2/2: Approve in Phantom (K2)..."
-                                : signingStep === "broadcasting" ? "Broadcasting to Solana..."
-                                : "Signing..."
-                              : t.access.sendBtn}
+                            {selHeld?.isLocked
+                              ? "Token Locked. Cannot Send."
+                              : !canSend
+                                ? (accessMode === "connect-wallets" ? "Connect both wallets to send" : "Load both cold keys above to send")
+                                : txLoading
+                                  ? signingStep === "phantom" ? "Step 1/2: Approve in Phantom..."
+                                  : signingStep === "solflare" ? "Step 2/2: Approve in Phantom (K2)..."
+                                  : signingStep === "broadcasting" ? "Broadcasting to Solana..."
+                                  : "Signing..."
+                                : t.access.sendBtn}
                           </button>
                           {canSend && !txLoading && (
                             <p className="font-handwritten text-xs text-[#1a1a1a]/25 text-center">
