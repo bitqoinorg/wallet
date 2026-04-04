@@ -56,7 +56,7 @@ export default function QonjointProtocol() {
   const divider = dark ? "border-[#FAFAF5]/10" : "border-[#1a1a1a]/10";
 
   const flow = [
-    { icon: <SketchTwoKeys className="w-8 h-8" />, label: "Two Keys Registered", desc: "Your two public keys are written on-chain as joint controllers of the vault address." },
+    { icon: <SketchTwoKeys className="w-8 h-8" />, label: "Two Keys Registered", desc: "Your two public keys are written on-chain as Qonjoint controllers of your Qoin." },
     { icon: <SketchShield className="w-8 h-8" />, label: "Transfer Requested", desc: "Any attempt to move tokens triggers the Qonjoint check on-chain." },
     { icon: <SketchKey className="w-8 h-8" />, label: "Key 1 Signs", desc: "The transaction is built locally and signed by your first private key." },
     { icon: <SketchKey className="w-8 h-8" />, label: "Key 2 Signs", desc: "The partially-signed transaction is then signed by your second private key." },
@@ -139,7 +139,7 @@ export default function QonjointProtocol() {
             <div className={`font-sketch text-xl mb-4 ${text}`}>What Makes This Different</div>
             <div className="space-y-4">
               {[
-                { title: "Not a smart contract wallet", body: "Qonjoint uses the Solana native signing program. There is no custom smart contract to audit, upgrade, or exploit." },
+                { title: "Not a smart contract wallet", body: "On Solana, Qonjoint uses the native signing program with no custom contract. On Ethereum, it uses a battle-tested on-chain Qoin account with a decade of production security." },
                 { title: "Not custodial", body: "No server holds your keys. You generate, store, and use them. The program verifies them. Nobody in between." },
                 { title: "Not reversible by design", body: "There is no admin key, no override mechanism, no emergency bypass. If both keys sign, the transaction goes through. If they do not, it does not." },
               ].map((item) => (
@@ -155,10 +155,10 @@ export default function QonjointProtocol() {
             <div className="space-y-2.5">
               {[
                 "Both keys must sign every outgoing transfer",
-                "Public keys are immutable after vault creation",
+                "Public keys are immutable after Qoin creation",
                 "No third party can override the signature requirement",
                 "Failed partial signatures do not move funds",
-                "The rule is enforced by Solana runtime, not UI code",
+                "The rule is enforced by the blockchain, not UI code",
               ].map((item, i) => (
                 <div key={i} className="flex items-start gap-3">
                   <div className="w-1.5 h-1.5 rounded-full bg-[#F7931A] mt-2 flex-shrink-0"/>
@@ -170,7 +170,7 @@ export default function QonjointProtocol() {
           <div className={`border-2 border-[#F7931A]/30 p-5 ${dark ? "bg-[#F7931A]/5" : "bg-[#FFF8EE]"}`}>
             <div className="font-handwritten text-xl text-[#F7931A] mb-2">Under the Hood</div>
             <p className={`font-body font-bold text-sm leading-relaxed ${muted}`}>
-              Qonjoint creates a dual-key vault account. This account becomes the authority over your token accounts. Any transfer instruction must include signatures from both registered keys or the Solana runtime rejects it at the validator level.
+              Qonjoint creates a dual-key Qoin account. This account becomes the authority over your token accounts. Any transfer instruction must include signatures from both registered keys or the network rejects it at the protocol level.
             </p>
           </div>
         </div>
