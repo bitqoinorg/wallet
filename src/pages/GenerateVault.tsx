@@ -4,7 +4,7 @@ import {
   generateKeypair,
   explorerUrl,
 } from "@/lib/solana";
-import { saveVaultAssociation } from "@/lib/vaultStore";
+import { saveVaultAssociation, saveEvmVaultAssociation } from "@/lib/vaultStore";
 import {
   SketchKey, SketchTwoKeys, SketchLock,
   SketchWarning, SketchWave, SketchAtom, SketchShield
@@ -134,6 +134,7 @@ export default function GenerateVault() {
       if (!res.ok || data.error) throw new Error(data.error || "Vault creation failed.");
       setEvmVaultAddress(data.vaultAddress!);
       setEvmVaultTxHash(data.txHash!);
+      saveEvmVaultAssociation(evmAddress1!, evmAddress2!, data.vaultAddress!);
       setStep("done");
     } catch (e: unknown) {
       setError((e as Error).message || "Failed to create EVM vault.");
@@ -261,7 +262,7 @@ export default function GenerateVault() {
                   <div className="border border-dashed border-[#F7931A]/40 rounded-sm px-4 py-5 text-center space-y-2 mb-4">
                     <p className="font-sketch text-base text-[#1a1a1a]">EVM Vault Creation</p>
                     <p className="font-handwritten text-sm text-[#1a1a1a]/50">
-                      EVM cold-key vaults are coming in Phase 4. Switch to Solana to create a Qonjoint vault now.
+                      EVM cold-key vaults are coming soon. Switch to Connect Wallets to create an EVM vault, or switch to Solana for cold-key creation.
                     </p>
                   </div>
                 ) : (
@@ -825,6 +826,8 @@ export default function GenerateVault() {
                       <p className="font-body text-base text-[#1a1a1a]/70">
                         {createMode === "cold-keys"
                           ? "Save Key 1, Key 2, and the Qoin Address. All three. We do not store any of this. Losing them means losing your tokens permanently."
+                          : chain === "evm"
+                          ? "Save the Vault Address. Both MetaMask keys must be available to sign any transfer. Losing access to either means losing your tokens permanently."
                           : "Save the Qoin Address. Both Phantom and Solflare wallets must be available to sign any transfer. Losing access to either means losing your tokens permanently."}
                       </p>
                     </div>
