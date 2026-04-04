@@ -166,7 +166,10 @@ export default function SubpageLayout({
         <div className="border-t border-white/5 mt-4">
           <div className="max-w-7xl mx-auto px-6 py-8 flex items-center justify-between">
             <span className="font-handwritten text-white/25 text-base">bitQoin</span>
-            <span className="font-handwritten text-white/20 text-sm">Solana + Ethereum</span>
+            <div className="flex items-center gap-4">
+              <a href="https://github.com/bitqoinorg" target="_blank" rel="noopener noreferrer" className="font-handwritten text-sm text-white/20 hover:text-[#F7931A] transition-colors">GitHub</a>
+              <a href="https://x.com/thebitcoin" target="_blank" rel="noopener noreferrer" className="font-body font-bold text-sm text-white/20 hover:text-[#F7931A] transition-colors">𝕏</a>
+            </div>
           </div>
         </div>
       </section>
