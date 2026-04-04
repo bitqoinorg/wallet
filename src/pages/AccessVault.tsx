@@ -52,15 +52,15 @@ interface ShieldData {
 const WSOL_MINT = "So11111111111111111111111111111111111111112";
 
 const POPULAR_TOKENS = [
-  { symbol: "wSOL",     mint: WSOL_MINT },
-  { symbol: "USDC",     mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" },
-  { symbol: "USDT",     mint: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB" },
-  { symbol: "BONK",     mint: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263" },
-  { symbol: "TRUMP",    mint: "6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN" },
-  { symbol: "FARTCOIN", mint: "9BB6NFEcjBCtnNLFko2FqVQBq8HHM13kCyYcdQbgpump" },
-  { symbol: "PUMP",     mint: "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn" },
-  { symbol: "BUTTCOIN", mint: "Cm6fNnMk7NfzStP9CZpsQA2v3jjzbcYGAxdJySmHpump" },
+  { symbol: "wSOL",  mint: WSOL_MINT },
+  { symbol: "USDC",  mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" },
+  { symbol: "wBTC",  mint: "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh" },
 ];
+
+const DISPLAY_SYMBOL: Record<string, string> = {
+  [WSOL_MINT]: "wSOL",
+  "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh": "wBTC",
+};
 
 type TxRecord = {
   sig: string; ts: number;
@@ -86,7 +86,7 @@ export default function AccessVault() {
     error1: evmError1, error2: evmError2,
     connectK1, connectK2,
     disconnectK1, disconnectK2,
-    signTypedDataK1, signTypedDataK2,
+    signTypedDataK1, signTypedDataK2, sendTransaction,
   } = useEvmWallet();
 
   const [accessMode, setAccessMode] = useState<"cold-keys" | "connect-wallets">("cold-keys");
@@ -137,6 +137,8 @@ export default function AccessVault() {
   const [evmSendStatus, setEvmSendStatus] = useState<"idle" | "fetchNonce" | "signing1" | "signing2" | "executing" | "done" | "error">("idle");
   const [evmSendTxHash, setEvmSendTxHash] = useState("");
   const [evmSendError, setEvmSendError] = useState("");
+  const [evmSidebarSelected, setEvmSidebarSelected] = useState<string>("eth");
+  const [evmActiveTab, setEvmActiveTab] = useState<"receive" | "send" | null>(null);
 
   const [chartData, setChartData] = useState<{ time: number; price: number }[]>([]);
   const [chartLoading, setChartLoading] = useState(false);
@@ -154,7 +156,7 @@ export default function AccessVault() {
 
   const [pub1Input, setPub1Input] = useState("");
   const [pub2Input, setPub2Input] = useState("");
-  const [showDirectAddr, setShowDirectAddr] = useState(false);
+  const [showDirectAddr, setShowDirectAddr] = useState(true);
 
   const [showAddToken, setShowAddToken] = useState(false);
   const [customMint, setCustomMint] = useState("");
@@ -169,6 +171,30 @@ export default function AccessVault() {
   const pk1Valid = isValidPrivateKey(pk1.trim());
   const pk2Valid = isValidPrivateKey(pk2.trim());
   const hasBothKeys = pk1Valid && pk2Valid;
+
+  // Track the last pubkey that loaded the current shield so we can detect account switches
+  const loadedForPubkeyRef = useRef<string | null>(null);
+
+  // When Phantom account changes while in Connect Wallets mode, reset the shield
+  // so the auto-detect effect below re-runs for the new account
+  useEffect(() => {
+    if (accessMode !== "connect-wallets") return;
+    if (loadedForPubkeyRef.current === null) {
+      loadedForPubkeyRef.current = phantomPubkey;
+      return;
+    }
+    if (phantomPubkey !== loadedForPubkeyRef.current) {
+      loadedForPubkeyRef.current = phantomPubkey;
+      // Clear current Qoin — auto-detect will pick up the new account below
+      setShield(null);
+      setActiveShieldAddress("");
+      setShieldInput("");
+      setSlotsDone(false);
+      setWalletMismatch(null);
+      setActiveTab(null);
+      setTxSig(""); setTxError("");
+    }
+  }, [phantomPubkey, accessMode]);
 
   // Auto-detect Qoin when both wallets connect in Connect Wallets mode
   useEffect(() => {
@@ -569,7 +595,7 @@ export default function AccessVault() {
         return signWithPhantom(tx);
       };
       const wrappedK2 = async (tx: import("@solana/web3.js").Transaction) => {
-        setSigningStep("phantom");
+        setSigningStep("solflare");
         return signK2(tx);
       };
 
@@ -591,7 +617,18 @@ export default function AccessVault() {
       const updated = await fetchBalance(activeShieldAddress);
       setShield(updated);
     } catch (e: unknown) {
-      setTxError((e as Error).message || "Transfer failed.");
+      console.error("Transfer error:", e);
+      let msg = "Transfer failed.";
+      if (typeof e === "string" && e) {
+        msg = e;
+      } else if (e && typeof e === "object") {
+        const obj = e as { message?: unknown; error?: unknown };
+        const inner = obj.error instanceof Error ? obj.error.message
+          : (typeof obj.error === "string" ? obj.error : null);
+        const outer = typeof obj.message === "string" ? obj.message : null;
+        msg = inner || outer || msg;
+      }
+      setTxError(msg);
     } finally {
       setTxLoading(false);
       setSigningStep(null);
@@ -618,6 +655,8 @@ export default function AccessVault() {
       setActiveTab(null);
       fetchChart(WSOL_MINT);
       fetchDexPrices(["__sol__", ...data.tokens.map(t => t.mint)]);
+      // Mark which pubkey loaded this shield so account-switch reset knows not to re-trigger
+      loadedForPubkeyRef.current = phantomPubkey;
 
       // Check if connected wallets match registered vault signers
       if (phantomPubkey || phantom2Pubkey) {
@@ -627,7 +666,7 @@ export default function AccessVault() {
             const { signers } = await sigRes.json() as { signers: string[] };
             const missing: string[] = [];
             if (phantomPubkey && !signers.includes(phantomPubkey)) missing.push("Phantom (K1)");
-            if (phantom2Pubkey && !signers.includes(phantom2Pubkey)) missing.push("Phantom (K2)");
+            if (phantom2Pubkey && !signers.includes(phantom2Pubkey)) missing.push("Solflare (K2)");
             if (missing.length > 0) {
               setWalletMismatch(
                 `${missing.join(" & ")} connected is not a signer of this Qoin. ` +
@@ -670,9 +709,8 @@ export default function AccessVault() {
     (t) => !shield?.tokens.some((st) => st.mint === t.mint)
   );
 
-  const selLabel = sidebarSelected === WSOL_MINT
-    ? "wSOL"
-    : (selHeld?.symbol ?? selMeta?.symbol ?? selPopular?.symbol ?? sidebarSelected.slice(0, 6));
+  const selLabel = DISPLAY_SYMBOL[sidebarSelected]
+    ?? (selHeld?.symbol ?? selMeta?.symbol ?? selPopular?.symbol ?? sidebarSelected.slice(0, 6));
 
   const selLogo = selHeld?.logo ?? selMeta?.image ?? null;
 
@@ -702,6 +740,8 @@ export default function AccessVault() {
     setRecipient(""); setAmount(""); setTxSig(""); setTxError("");
     if (held) setSelectedToken(held);
   }
+
+  const needsSetup = !!(shield && activeShieldAddress && (shield.tokens.some(tk => tk.isLocked) || shield.tokens.length === 0) && !slotsDone);
 
   return (
     <div className={`flex flex-col h-screen overflow-hidden ${dark ? "bg-[#0f0f0f]" : "bg-[#FAFAF5]"}`}>
@@ -961,26 +1001,16 @@ export default function AccessVault() {
           {chain === "solana" && accessMode === "cold-keys" && (
             <div className="w-full max-w-md space-y-3">
               <p className="font-handwritten text-sm text-[#1a1a1a]/40">
-                Paste your Key 1 and Key 2 public keys to find your Qoin.
+                Paste either Key 1 or Key 2 to find your Qoin.
               </p>
               <input
                 type="text"
                 value={pub1Input}
                 onChange={(e) => { setPub1Input(e.target.value); setError(""); }}
-                placeholder="Key 1 public key..."
+                onKeyDown={(e) => e.key === "Enter" && handleViewByPubkeys()}
+                placeholder="Key 1 or Key 2 public key..."
                 className="input-sketch w-full text-sm py-3.5 font-mono"
                 autoFocus
-                autoComplete="off"
-                autoCorrect="off"
-                spellCheck={false}
-              />
-              <input
-                type="text"
-                value={pub2Input}
-                onChange={(e) => { setPub2Input(e.target.value); setError(""); }}
-                onKeyDown={(e) => e.key === "Enter" && handleViewByPubkeys()}
-                placeholder="Key 2 public key... (optional)"
-                className="input-sketch w-full text-sm py-3.5 font-mono"
                 autoComplete="off"
                 autoCorrect="off"
                 spellCheck={false}
@@ -1025,12 +1055,12 @@ export default function AccessVault() {
             </div>
           )}
 
-          {/* SOL — Connect Wallets mode (Dual Phantom) */}
+          {/* SOL — Connect Wallets mode (Phantom + Solflare) */}
           {chain === "solana" && accessMode === "connect-wallets" && (
             <div className="w-full max-w-md space-y-4">
 
               <p className="font-handwritten text-sm text-[#1a1a1a]/40">
-                Connect Phantom as Key 1, switch accounts in the extension, then connect as Key 2.
+                Connect Phantom as Key 1 and Solflare as Key 2. Both must be installed.
               </p>
 
               {/* Key 1 (always Phantom) */}
@@ -1062,12 +1092,12 @@ export default function AccessVault() {
                 </div>
               </div>
 
-              {/* Key 2 — Phantom (second account) */}
+              {/* Key 2 — Solflare */}
               <div className="border-2 border-[#1a1a1a] rounded-sm overflow-hidden">
                 <div className="flex items-center justify-between px-4 py-3 border-b border-[#1a1a1a]/10 bg-[#FAFAF5]">
                   <div className="flex items-center gap-2">
-                    <img src="/phantom-logo.png" className="w-8 h-8 rounded-xl flex-shrink-0" style={{ opacity: phantom2Pubkey ? 1 : 0.6 }} alt="Phantom K2" />
-                    <span className="font-body font-bold text-sm text-[#1a1a1a]">Key 2 (Phantom — switch account first)</span>
+                    <img src="/solflare-logo.png" className="w-8 h-8 rounded-xl flex-shrink-0" style={{ opacity: phantom2Pubkey ? 1 : 0.6 }} alt="Solflare" />
+                    <span className="font-body font-bold text-sm text-[#1a1a1a]">Key 2 (Solflare)</span>
                   </div>
                   {phantom2Pubkey && (
                     <span className="font-mono text-xs text-[#1a1a1a]/40">{phantom2Pubkey.slice(0, 6)}...{phantom2Pubkey.slice(-4)}</span>
@@ -1078,7 +1108,7 @@ export default function AccessVault() {
                   {!phantomPubkey && <p className="font-handwritten text-xs text-[#1a1a1a]/30 mb-2">Connect Key 1 first.</p>}
                   {phantom2Pubkey ? (
                     <button onClick={disconnectPhantom2} className="w-full font-body font-bold text-xs py-2 border border-[#1a1a1a]/20 rounded-sm hover:bg-[#FAFAF5] transition-all">
-                      Disconnect Phantom (K2)
+                      Disconnect Solflare (K2)
                     </button>
                   ) : (
                     <button
@@ -1086,11 +1116,11 @@ export default function AccessVault() {
                       disabled={phantom2Connecting || !phantomPubkey}
                       className="w-full font-body font-bold text-sm py-2.5 border-2 border-[#1a1a1a] rounded-sm bg-white hover:bg-[#1a1a1a] hover:text-white transition-all disabled:opacity-40"
                     >
-                      {phantom2Connecting ? "Connecting..." : "Connect Phantom (Key 2)"}
+                      {phantom2Connecting ? "Connecting..." : "Connect Solflare (Key 2)"}
                     </button>
                   )}
                   {!phantom2Pubkey && phantomPubkey && (
-                    <p className="font-handwritten text-xs text-[#1a1a1a]/30 mt-1.5">Switch to your second Phantom account in the extension, then connect.</p>
+                    <p className="font-handwritten text-xs text-[#1a1a1a]/30 mt-1.5">Open Solflare extension and connect as Key 2.</p>
                   )}
                 </div>
               </div>
@@ -1139,375 +1169,381 @@ export default function AccessVault() {
             Don't have a Qoin? Create one →
           </button>
         </div>
-      ) : evmShield ? (
+      ) : evmShield ? (() => {
+        const evmSelIsEth = evmSidebarSelected === "eth";
+        const evmSelToken = evmSelIsEth ? null : evmShield.tokens.find(t => t.contract === evmSidebarSelected);
+        const evmSelSymbol = evmSelIsEth ? "ETH" : (evmSelToken?.symbol ?? "");
+        const evmSelName   = evmSelIsEth ? "Ether" : (evmSelToken?.name ?? "");
+        const evmSelBal    = evmSelIsEth ? evmShield.ethBalance : (evmSelToken?.balance ?? 0);
+        const evmSelLogo   = evmSelIsEth ? "/eth-logo.png" : (evmSelToken?.logo ?? "");
+        const evmSelDec    = evmSelIsEth ? 18 : (evmSelToken?.decimals ?? 18);
+
+        function resetSend() {
+          setEvmSendStatus("idle"); setEvmSig1(null); setEvmSig2(null);
+          setEvmSendNonce(null); setEvmSendRecipient(""); setEvmSendAmount(""); setEvmSendError("");
+        }
+
+        return (
         /* ── EVM DASHBOARD ── */
-        <div className="flex-1 overflow-auto">
-          <div className="max-w-2xl mx-auto px-5 py-8 space-y-6">
-            {/* Header */}
-            <div className="border-2 border-[#1a1a1a] rounded-sm bg-white p-5 shadow-[3px_3px_0_#1a1a1a]">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <div className="font-handwritten text-xs text-[#1a1a1a]/40 uppercase tracking-widest mb-1">EVM Address</div>
-                  <div className="font-mono text-sm text-[#1a1a1a] break-all">{evmActiveAddress}</div>
-                </div>
-                <div className="flex gap-2">
-                  <a
-                    href={`https://etherscan.io/address/${evmActiveAddress}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="font-body font-bold text-xs text-[#F7931A] hover:underline"
-                  >
-                    Etherscan ↗
-                  </a>
-                  <button
-                    onClick={() => { setEvmShield(null); setEvmActiveAddress(""); setEvmAddressInput(""); }}
-                    className="font-body font-bold text-xs text-[#1a1a1a]/40 hover:text-[#F7931A] transition-colors ml-3"
-                  >
-                    ✕ Close
-                  </button>
-                </div>
+        <div className="flex flex-1 overflow-hidden">
+
+          {/* LEFT SIDEBAR */}
+          <div className="w-14 md:w-60 flex-shrink-0 border-r-2 border-[#1a1a1a]/10 bg-white flex flex-col overflow-hidden">
+            <div className="overflow-y-auto flex-1 py-2">
+
+              <div className="hidden md:block px-4 pt-2 pb-1">
+                <span className="font-body font-bold text-xs text-[#1a1a1a]/50 uppercase tracking-widest">Assets</span>
               </div>
 
-              {/* ETH balance */}
-              <div className="flex items-end gap-3 py-4 border-t border-[#1a1a1a]/10">
-                <div>
-                  <div className="font-handwritten text-xs text-[#1a1a1a]/40 uppercase tracking-widest mb-1">ETH Balance</div>
-                  <div className="font-sketch text-3xl text-[#1a1a1a]">{evmShield.ethBalance.toFixed(6)}</div>
-                  <div className="font-handwritten text-sm text-[#1a1a1a]/50">Ether</div>
+              {/* ETH row */}
+              <button
+                onClick={() => { setEvmSidebarSelected("eth"); setEvmActiveTab(null); resetSend(); }}
+                className={`w-full flex items-center justify-center md:justify-start gap-2.5 px-2 md:px-4 py-2.5 transition-all ${evmSidebarSelected === "eth" ? "bg-[#F7931A]/10 border-l-4 border-l-[#F7931A]" : "border-l-4 border-l-transparent hover:bg-[#FAFAF5]"}`}
+              >
+                <img src="/eth-logo.png" alt="ETH" className="w-9 h-9 rounded-full object-cover flex-shrink-0" />
+                <div className="hidden md:block min-w-0 flex-1">
+                  <div className="font-body font-bold text-sm text-[#1a1a1a] truncate leading-none">ETH</div>
+                  <div className="font-mono text-xs text-[#1a1a1a]/50 mt-0.5">{fmtBalance(evmShield.ethBalance)}</div>
                 </div>
+              </button>
+
+              {/* ERC-20 tokens */}
+              {evmShield.tokens.map((tok) => (
+                <button
+                  key={tok.contract}
+                  onClick={() => { setEvmSidebarSelected(tok.contract); setEvmActiveTab(null); resetSend(); }}
+                  className={`w-full flex items-center justify-center md:justify-start gap-2.5 px-2 md:px-4 py-2.5 transition-all ${evmSidebarSelected === tok.contract ? "bg-[#F7931A]/10 border-l-4 border-l-[#F7931A]" : "border-l-4 border-l-transparent hover:bg-[#FAFAF5]"}`}
+                >
+                  {tok.logo ? (
+                    <img src={tok.logo} alt={tok.symbol} className="w-9 h-9 rounded-full object-cover flex-shrink-0" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
+                  ) : (
+                    <div className="w-9 h-9 rounded-full bg-[#1a1a1a]/10 flex items-center justify-center flex-shrink-0">
+                      <span className="font-sketch text-xs text-[#1a1a1a]/40">{tok.symbol.slice(0, 2)}</span>
+                    </div>
+                  )}
+                  <div className="hidden md:block min-w-0 flex-1">
+                    <div className="font-body font-bold text-sm text-[#1a1a1a] truncate leading-none">{tok.symbol}</div>
+                    <div className="font-mono text-xs text-[#1a1a1a]/50 mt-0.5">{fmtBalance(tok.balance)}</div>
+                  </div>
+                </button>
+              ))}
+
+              {evmShield.tokens.length === 0 && (
+                <div className="hidden md:block px-4 py-3">
+                  <p className="font-handwritten text-sm text-[#1a1a1a]/40">No ERC-20 tokens.</p>
+                </div>
+              )}
+            </div>
+
+            {/* Sidebar footer */}
+            <div className="hidden md:block border-t-2 border-[#1a1a1a]/10 px-4 py-3 flex-shrink-0">
+              <div className="font-body font-bold text-xs text-[#1a1a1a]/50 mb-0.5">Qoin Address</div>
+              <div className="font-mono text-[10px] text-[#1a1a1a]/40 break-all leading-relaxed">{evmActiveAddress}</div>
+              <div className="flex gap-2 mt-2">
+                <a
+                  href={`https://blockchair.com/ethereum/address/${evmActiveAddress}`}
+                  target="_blank" rel="noopener noreferrer"
+                  className="font-body font-bold text-xs text-[#F7931A] hover:underline"
+                >Blockchair ↗</a>
+                <button
+                  onClick={() => { setEvmShield(null); setEvmActiveAddress(""); setEvmAddressInput(""); setEvmSidebarSelected("eth"); setEvmActiveTab(null); }}
+                  className="font-body font-bold text-xs text-[#1a1a1a]/30 hover:text-red-500 transition-colors"
+                >Close</button>
+              </div>
+            </div>
+          </div>
+
+          {/* RIGHT CONTENT */}
+          <div className="flex-1 overflow-y-auto">
+            <div className="max-w-4xl mx-auto px-6 py-6 space-y-5">
+
+              {/* Token header */}
+              <div className="flex items-center gap-4">
+                {evmSelLogo ? (
+                  <img src={evmSelLogo} className="w-14 h-14 rounded-full object-cover flex-shrink-0" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
+                ) : (
+                  <div className="w-14 h-14 rounded-full bg-[#1a1a1a]/10 flex items-center justify-center flex-shrink-0">
+                    <span className="font-sketch text-base text-[#1a1a1a]/30">{evmSelSymbol.slice(0, 3)}</span>
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="font-sketch text-3xl text-[#1a1a1a] leading-none">{evmSelSymbol}</div>
+                  <div className="font-sketch text-xl mt-0.5 leading-none" style={{ color: evmSelBal > 0 ? "#F7931A" : "#1a1a1a", opacity: evmSelBal > 0 ? 1 : 0.3 }}>
+                    {fmtBalance(evmSelBal)} {evmSelSymbol}
+                  </div>
+                  <div className="font-handwritten text-sm text-[#1a1a1a]/40 mt-0.5">{evmSelName}</div>
+                </div>
+                {/* Mobile close */}
+                <button
+                  onClick={() => { setEvmShield(null); setEvmActiveAddress(""); setEvmAddressInput(""); setEvmSidebarSelected("eth"); setEvmActiveTab(null); }}
+                  className="md:hidden font-body font-bold text-xs text-[#1a1a1a]/30 hover:text-red-500 transition-colors flex-shrink-0"
+                >✕ Close</button>
               </div>
 
-              {/* Co-signers (if connected) */}
+              {/* Co-signers strip */}
               {(evmAddress1 || evmAddress2) && (
-                <div className="border-t border-[#1a1a1a]/10 pt-4 mt-2 space-y-2">
-                  <div className="font-handwritten text-xs text-[#1a1a1a]/40 uppercase tracking-widest">Co-signers connected</div>
+                <div className="flex items-center gap-4 px-4 py-3 border border-[#1a1a1a]/10 rounded-sm bg-white">
                   {evmAddress1 && (
-                    <div className="flex items-center gap-2">
-                      <img src="/metamask-logo.png" className="w-5 h-5 rounded-lg flex-shrink-0" alt="MetaMask" />
-                      <span className="font-mono text-xs text-[#1a1a1a]/60">K1: {evmAddress1.slice(0, 10)}...{evmAddress1.slice(-6)}</span>
+                    <div className="flex items-center gap-1.5">
+                      <img src="/metamask-logo.png" className="w-4 h-4 rounded flex-shrink-0" alt="MetaMask" />
+                      <span className="font-mono text-xs text-[#1a1a1a]/50">K1 {evmAddress1.slice(0, 6)}…{evmAddress1.slice(-4)}</span>
                     </div>
                   )}
                   {evmAddress2 && (
+                    <div className="flex items-center gap-1.5">
+                      <img src="/metamask-logo.png" className="w-4 h-4 rounded flex-shrink-0" alt="MetaMask" />
+                      <span className="font-mono text-xs text-[#1a1a1a]/50">K2 {evmAddress2.slice(0, 6)}…{evmAddress2.slice(-4)}</span>
+                    </div>
+                  )}
+                  <a href={`https://blockchair.com/ethereum/address/${evmActiveAddress}`} target="_blank" rel="noopener noreferrer" className="ml-auto font-body font-bold text-xs text-[#F7931A] hover:underline md:hidden">Blockchair ↗</a>
+                </div>
+              )}
+
+              {/* Receive / Send action buttons */}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setEvmActiveTab(evmActiveTab === "receive" ? null : "receive")}
+                  className={`flex-1 py-4 font-body font-bold text-base rounded-sm border-2 transition-all flex items-center justify-center gap-2 ${
+                    evmActiveTab === "receive"
+                      ? "border-[#1a1a1a] bg-[#1a1a1a] text-white"
+                      : "border-[#1a1a1a] bg-white text-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-white"
+                  }`}
+                >
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2v9M4 7l4 4 4-4M2 13h12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  Receive
+                </button>
+                <button
+                  onClick={() => { setEvmActiveTab(evmActiveTab === "send" ? null : "send"); resetSend(); }}
+                  className={`flex-1 py-4 font-body font-bold text-base rounded-sm border-2 transition-all flex items-center justify-center gap-2 ${
+                    evmActiveTab === "send"
+                      ? "border-[#F7931A] bg-[#F7931A] text-white"
+                      : "border-[#F7931A] text-[#F7931A] hover:bg-[#F7931A] hover:text-white"
+                  }`}
+                >
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 14V5M4 9l4-4 4 4M2 3h12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  Send
+                </button>
+              </div>
+
+              {/* RECEIVE PANEL */}
+              {evmActiveTab === "receive" && (
+                <div className="border-2 border-[#1a1a1a] rounded-sm bg-white shadow-[3px_3px_0_#1a1a1a] overflow-hidden">
+                  <div className="flex flex-col items-center px-6 py-8 space-y-5">
+                    <div className="font-sketch text-2xl text-[#1a1a1a]">Receive {evmSelSymbol}</div>
+                    <div className="w-full border-2 border-[#1a1a1a]/10 bg-[#FAFAF5] rounded-sm px-4 py-3 space-y-1">
+                      <div className="font-handwritten text-xs text-[#1a1a1a]/40 uppercase tracking-widest mb-1">Qoin Address</div>
+                      <div className="font-mono text-sm text-[#1a1a1a] break-all">{evmActiveAddress}</div>
+                    </div>
+                    <div className="border-4 border-[#1a1a1a] p-4 rounded-sm bg-white shadow-[4px_4px_0_#1a1a1a]">
+                      <QRCodeSVG value={evmActiveAddress} size={200} bgColor="#ffffff" fgColor="#1a1a1a" level="M" />
+                    </div>
+                    <button
+                      onClick={async () => { await navigator.clipboard.writeText(evmActiveAddress); }}
+                      className="btn-sketch px-8 py-3 text-sm"
+                    >
+                      Copy Address
+                    </button>
+                    <p className="font-handwritten text-xs text-[#1a1a1a]/40 text-center max-w-xs">
+                      Send {evmSelSymbol} directly to this Ethereum address. ETH and all ERC-20 tokens share the same Qoin address.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* SEND PANEL */}
+              {evmActiveTab === "send" && (
+                <div className="border-2 border-[#1a1a1a] rounded-sm bg-white shadow-[3px_3px_0_#1a1a1a] overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-3 border-b-2 border-[#1a1a1a]/10 bg-[#FAFAF5]">
                     <div className="flex items-center gap-2">
-                      <img src="/metamask-logo.png" className="w-5 h-5 rounded-lg flex-shrink-0" alt="MetaMask" />
-                      <span className="font-mono text-xs text-[#1a1a1a]/60">K2: {evmAddress2.slice(0, 10)}...{evmAddress2.slice(-6)}</span>
+                      {evmSelLogo && <img src={evmSelLogo} className="w-5 h-5 rounded-full object-cover" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />}
+                      <span className="font-sketch text-base text-[#1a1a1a]">Send {evmSelSymbol}</span>
+                    </div>
+                    <button onClick={() => setEvmActiveTab(null)} className="font-handwritten text-xs text-[#1a1a1a]/30 hover:text-red-500 transition-colors">cancel</button>
+                  </div>
+
+                  {evmSendStatus === "done" ? (
+                    <div className="px-4 py-6 text-center space-y-3">
+                      <div className="font-sketch text-2xl text-[#1a1a1a]">Sent!</div>
+                      <p className="font-handwritten text-sm text-[#1a1a1a]/50">Transaction submitted on-chain.</p>
+                      <a href={`https://blockchair.com/ethereum/transaction/${evmSendTxHash}`} target="_blank" rel="noopener noreferrer" className="inline-block font-body font-bold text-sm text-[#F7931A] hover:underline">
+                        View on Blockchair ↗
+                      </a>
+                      <div>
+                        <button onClick={resetSend} className="btn-sketch-outline text-sm py-2 px-5 bg-white mt-2">Send another</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="px-4 py-4 space-y-4">
+                      {/* K1/K2 connect check */}
+                      {(!evmAddress1 || !evmAddress2) && (
+                        <div className="space-y-2">
+                          <p className="font-handwritten text-sm text-[#1a1a1a]/50">Both K1 and K2 must be connected to sign a send transaction.</p>
+                          {!evmAddress1 && (
+                            <button onClick={connectK1} disabled={evmConnecting1} className="btn-sketch-outline w-full text-sm py-2 bg-white">
+                              {evmConnecting1 ? "Connecting..." : "Connect K1 (MetaMask)"}
+                            </button>
+                          )}
+                          {evmAddress1 && !evmAddress2 && (
+                            <button onClick={connectK2} disabled={evmConnecting2} className="btn-sketch-outline w-full text-sm py-2 bg-white">
+                              {evmConnecting2 ? "Connecting..." : "Connect K2 (MetaMask)"}
+                            </button>
+                          )}
+                          {evmError1 && <p className="font-handwritten text-xs text-red-500">{evmError1}</p>}
+                          {evmError2 && <p className="font-handwritten text-xs text-red-500">{evmError2}</p>}
+                        </div>
+                      )}
+
+                      {evmAddress1 && evmAddress2 && (
+                        <>
+                          {/* Recipient */}
+                          <div>
+                            <label className="font-handwritten text-xs text-[#1a1a1a]/40 uppercase tracking-widest block mb-1.5">Recipient Address</label>
+                            <input
+                              type="text" placeholder="0x..."
+                              value={evmSendRecipient}
+                              onChange={(e) => { setEvmSendRecipient(e.target.value); setEvmSig1(null); setEvmSig2(null); setEvmSendNonce(null); }}
+                              disabled={evmSendStatus !== "idle"}
+                              className="w-full border-2 border-[#1a1a1a] rounded-sm px-3 py-2 font-mono text-sm bg-white placeholder:text-[#1a1a1a]/20 disabled:opacity-40"
+                            />
+                          </div>
+
+                          {/* Amount */}
+                          <div>
+                            <label className="font-handwritten text-xs text-[#1a1a1a]/40 uppercase tracking-widest block mb-1.5">Amount ({evmSelSymbol})</label>
+                            <input
+                              type="number" placeholder="0.0" min="0" step="any"
+                              value={evmSendAmount}
+                              onChange={(e) => { setEvmSendAmount(e.target.value); setEvmSig1(null); setEvmSig2(null); setEvmSendNonce(null); }}
+                              disabled={evmSendStatus !== "idle"}
+                              className="w-full border-2 border-[#1a1a1a] rounded-sm px-3 py-2 font-body text-sm bg-white disabled:opacity-40"
+                            />
+                          </div>
+
+                          {evmSendError && <p className="font-handwritten text-sm text-red-500">{evmSendError}</p>}
+
+                          {/* Step 1: fetch nonce + K1 sign */}
+                          {!evmSig1 && (
+                            <button
+                              disabled={!evmSendRecipient || !evmSendAmount || evmSendStatus === "fetchNonce" || evmSendStatus === "signing1"}
+                              onClick={async () => {
+                                setEvmSendError("");
+                                if (!/^0x[0-9a-fA-F]{40}$/.test(evmSendRecipient)) { setEvmSendError("Invalid recipient address."); return; }
+                                const amt = parseFloat(evmSendAmount);
+                                if (isNaN(amt) || amt <= 0) { setEvmSendError("Invalid amount."); return; }
+                                try {
+                                  setEvmSendStatus("fetchNonce");
+                                  const r = await fetch(`/api/evm/vault-info?address=${encodeURIComponent(evmActiveAddress)}`);
+                                  const d = await r.json() as { nonce?: string; error?: string };
+                                  if (!r.ok || d.error) throw new Error(d.error || "Failed to fetch nonce.");
+                                  const nonce = d.nonce!;
+                                  setEvmSendNonce(nonce);
+                                  const amountBig = parseTokenAmount(evmSendAmount, evmSelDec);
+                                  const txTo = evmSelIsEth ? evmSendRecipient : evmSidebarSelected;
+                                  const txValue = evmSelIsEth ? amountBig : 0n;
+                                  const txData = evmSelIsEth ? "0x" : encodeERC20Transfer(evmSendRecipient, amountBig);
+                                  const safeTx = buildSafeTx({ to: txTo, value: txValue, data: txData, nonce });
+                                  const typedData = buildTypedData(evmActiveAddress, 1, safeTx);
+                                  setEvmSendStatus("signing1");
+                                  const sig1 = await signTypedDataK1(typedData);
+                                  setEvmSig1(sig1);
+                                  setEvmSendStatus("idle");
+                                } catch (e: unknown) {
+                                  setEvmSendError((e as Error).message || "Signing failed.");
+                                  setEvmSendStatus("idle");
+                                }
+                              }}
+                              className="w-full py-3 border-2 border-[#1a1a1a] rounded-sm font-sketch text-base bg-white hover:bg-[#FAFAF5] transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                            >
+                              {evmSendStatus === "fetchNonce" ? "Fetching nonce..." : evmSendStatus === "signing1" ? "Waiting for K1 signature..." : "Step 1: Sign with K1"}
+                            </button>
+                          )}
+
+                          {evmSig1 && (
+                            <div className="flex items-center gap-2 px-3 py-2 border border-green-300 bg-green-50 rounded-sm">
+                              <svg viewBox="0 0 16 16" fill="none" className="w-4 h-4 text-green-600 flex-shrink-0"><path d="M3 8.5L6.5 12L13 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                              <span className="font-handwritten text-sm text-green-700">K1 signed</span>
+                              <button onClick={() => { setEvmSig1(null); setEvmSig2(null); setEvmSendNonce(null); setEvmSendStatus("idle"); }} className="ml-auto font-handwritten text-xs text-[#1a1a1a]/30 hover:text-red-500">redo</button>
+                            </div>
+                          )}
+
+                          {evmSig1 && !evmSig2 && (
+                            <button
+                              disabled={evmSendStatus === "signing2"}
+                              onClick={async () => {
+                                setEvmSendError("");
+                                try {
+                                  const amountBig = parseTokenAmount(evmSendAmount, evmSelDec);
+                                  const txTo = evmSelIsEth ? evmSendRecipient : evmSidebarSelected;
+                                  const txValue = evmSelIsEth ? amountBig : 0n;
+                                  const txData = evmSelIsEth ? "0x" : encodeERC20Transfer(evmSendRecipient, amountBig);
+                                  const safeTx = buildSafeTx({ to: txTo, value: txValue, data: txData, nonce: evmSendNonce! });
+                                  const typedData = buildTypedData(evmActiveAddress, 1, safeTx);
+                                  setEvmSendStatus("signing2");
+                                  const sig2 = await signTypedDataK2(typedData);
+                                  setEvmSig2(sig2);
+                                  setEvmSendStatus("idle");
+                                } catch (e: unknown) {
+                                  setEvmSendError((e as Error).message || "K2 signing failed.");
+                                  setEvmSendStatus("idle");
+                                }
+                              }}
+                              className="w-full py-3 border-2 border-[#F7931A] rounded-sm font-sketch text-base bg-white hover:bg-[#F7931A]/5 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                            >
+                              {evmSendStatus === "signing2" ? "Waiting for K2 signature..." : "Step 2: Sign with K2"}
+                            </button>
+                          )}
+
+                          {evmSig2 && (
+                            <div className="flex items-center gap-2 px-3 py-2 border border-green-300 bg-green-50 rounded-sm">
+                              <svg viewBox="0 0 16 16" fill="none" className="w-4 h-4 text-green-600 flex-shrink-0"><path d="M3 8.5L6.5 12L13 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                              <span className="font-handwritten text-sm text-green-700">K2 signed</span>
+                            </div>
+                          )}
+
+                          {evmSig1 && evmSig2 && (
+                            <>
+                              <div className="flex items-center gap-2 px-3 py-2 border border-[#1a1a1a]/10 bg-[#FAFAF5] rounded-sm">
+                                <svg viewBox="0 0 16 16" fill="none" className="w-4 h-4 text-[#1a1a1a]/40 flex-shrink-0"><path d="M8 2v12M2 8h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                                <span className="font-handwritten text-xs text-[#1a1a1a]/40">K1 pays execution gas from MetaMask (not the Qoin).</span>
+                              </div>
+                              <button
+                                disabled={evmSendStatus === "executing"}
+                                onClick={async () => {
+                                  setEvmSendError("");
+                                  try {
+                                    const amountBig = parseTokenAmount(evmSendAmount, evmSelDec);
+                                    const txTo = evmSelIsEth ? evmSendRecipient : evmSidebarSelected;
+                                    const txValue = evmSelIsEth ? amountBig : 0n;
+                                    const txData = evmSelIsEth ? "0x" : encodeERC20Transfer(evmSendRecipient, amountBig);
+                                    const safeTx = buildSafeTx({ to: txTo, value: txValue, data: txData, nonce: evmSendNonce! });
+                                    const packed = packSignatures(evmSig1!, evmAddress1!, evmSig2!, evmAddress2!);
+                                    const calldata = encodeExecTransaction(safeTx, packed);
+                                    setEvmSendStatus("executing");
+                                    const txHash = await sendTransaction({ from: evmAddress1!, to: evmActiveAddress, data: calldata, gas: "0x7A120" });
+                                    setEvmSendTxHash(txHash);
+                                    setEvmSendStatus("done");
+                                  } catch (e: unknown) {
+                                    setEvmSendError((e as Error).message || "Execution failed.");
+                                    setEvmSendStatus("idle");
+                                  }
+                                }}
+                                className="btn-sketch w-full text-lg py-4"
+                              >
+                                {evmSendStatus === "executing" ? "Broadcasting..." : "Step 3: Execute Transaction"}
+                              </button>
+                            </>
+                          )}
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
               )}
             </div>
-
-            {/* ERC20 Tokens */}
-            {evmShield.tokens.length > 0 ? (
-              <div className="border-2 border-[#1a1a1a] rounded-sm bg-white shadow-[3px_3px_0_#1a1a1a] overflow-hidden">
-                <div className="px-4 py-3 border-b border-[#1a1a1a]/10">
-                  <span className="font-sketch text-base text-[#1a1a1a]">Token Holdings</span>
-                </div>
-                <div className="divide-y divide-[#1a1a1a]/6">
-                  {evmShield.tokens.map((tok) => (
-                    <div key={tok.contract} className="flex items-center gap-3 px-4 py-3">
-                      {tok.logo ? (
-                        <img src={tok.logo} alt={tok.symbol} className="w-9 h-9 rounded-full object-cover flex-shrink-0" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
-                      ) : (
-                        <div className="w-9 h-9 rounded-full bg-[#1a1a1a]/10 flex items-center justify-center flex-shrink-0">
-                          <span className="font-sketch text-xs text-[#1a1a1a]/40">{tok.symbol.slice(0, 2)}</span>
-                        </div>
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <div className="font-body font-bold text-sm text-[#1a1a1a]">{tok.symbol}</div>
-                        <div className="font-mono text-xs text-[#1a1a1a]/40 truncate">{tok.name}</div>
-                      </div>
-                      <div className="text-right flex-shrink-0">
-                        <div className="font-body font-bold text-sm text-[#1a1a1a] tabular-nums">{fmtBalance(tok.balance)}</div>
-                        <div className="font-mono text-xs text-[#1a1a1a]/35">{tok.symbol}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div className="text-center py-6">
-                <p className="font-handwritten text-sm text-[#1a1a1a]/40">No ERC-20 token balances found.</p>
-              </div>
-            )}
-
-            {/* EVM SEND PANEL */}
-            {!evmSendOpen ? (
-              <div className="flex justify-center">
-                <button
-                  onClick={() => {
-                    setEvmSendOpen(true);
-                    setEvmSendStatus("idle");
-                    setEvmSig1(null);
-                    setEvmSig2(null);
-                    setEvmSendTxHash("");
-                    setEvmSendError("");
-                    setEvmSendNonce(null);
-                  }}
-                  className="btn-sketch text-base py-3 px-8"
-                >
-                  Send from Qoin
-                </button>
-              </div>
-            ) : (
-              <div className="border-2 border-[#1a1a1a] rounded-sm bg-white shadow-[3px_3px_0_#1a1a1a] overflow-hidden">
-                {/* Send header */}
-                <div className="flex items-center justify-between px-4 py-3 border-b-2 border-[#1a1a1a]/10 bg-[#FAFAF5]">
-                  <span className="font-sketch text-base text-[#1a1a1a]">Send from Qoin</span>
-                  <button
-                    onClick={() => { setEvmSendOpen(false); setEvmSendStatus("idle"); }}
-                    className="font-handwritten text-xs text-[#1a1a1a]/30 hover:text-red-500 transition-colors"
-                  >
-                    cancel
-                  </button>
-                </div>
-
-                {evmSendStatus === "done" ? (
-                  <div className="px-4 py-6 text-center space-y-3">
-                    <div className="font-sketch text-2xl text-[#1a1a1a]">Sent!</div>
-                    <p className="font-handwritten text-sm text-[#1a1a1a]/50">Transaction submitted on-chain.</p>
-                    <a
-                      href={`https://etherscan.io/tx/${evmSendTxHash}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-block font-body font-bold text-sm text-[#F7931A] hover:underline"
-                    >
-                      View on Etherscan ↗
-                    </a>
-                    <div>
-                      <button
-                        onClick={() => { setEvmSendStatus("idle"); setEvmSig1(null); setEvmSig2(null); setEvmSendNonce(null); setEvmSendRecipient(""); setEvmSendAmount(""); }}
-                        className="btn-sketch-outline text-sm py-2 px-5 bg-white mt-2"
-                      >
-                        Send another
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="px-4 py-4 space-y-4">
-                    {/* K1/K2 connect check */}
-                    {(!evmAddress1 || !evmAddress2) && (
-                      <div className="space-y-2">
-                        <p className="font-handwritten text-sm text-[#1a1a1a]/50">Both K1 and K2 must be connected to sign a send transaction.</p>
-                        {!evmAddress1 && (
-                          <button onClick={connectK1} disabled={evmConnecting1} className="btn-sketch-outline w-full text-sm py-2 bg-white">
-                            {evmConnecting1 ? "Connecting..." : "Connect K1 (MetaMask)"}
-                          </button>
-                        )}
-                        {evmAddress1 && !evmAddress2 && (
-                          <button onClick={connectK2} disabled={evmConnecting2} className="btn-sketch-outline w-full text-sm py-2 bg-white">
-                            {evmConnecting2 ? "Connecting..." : "Connect K2 (MetaMask)"}
-                          </button>
-                        )}
-                        {evmError1 && <p className="font-handwritten text-xs text-red-500">{evmError1}</p>}
-                        {evmError2 && <p className="font-handwritten text-xs text-red-500">{evmError2}</p>}
-                      </div>
-                    )}
-
-                    {evmAddress1 && evmAddress2 && (
-                      <>
-                        {/* Token selector */}
-                        <div>
-                          <label className="font-handwritten text-xs text-[#1a1a1a]/40 uppercase tracking-widest block mb-1.5">Token to Send</label>
-                          <select
-                            value={evmSendTokenId}
-                            onChange={(e) => { setEvmSendTokenId(e.target.value); setEvmSig1(null); setEvmSig2(null); setEvmSendNonce(null); }}
-                            disabled={evmSendStatus !== "idle"}
-                            className="w-full border-2 border-[#1a1a1a] rounded-sm px-3 py-2 font-body text-sm bg-white disabled:opacity-40"
-                          >
-                            <option value="eth">ETH (Ether)</option>
-                            {evmShield && evmShield.tokens.map((tok) => (
-                              <option key={tok.contract} value={tok.contract}>
-                                {tok.symbol} — {tok.balance.toLocaleString(undefined, { maximumFractionDigits: 6 })} available
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        {/* Recipient */}
-                        <div>
-                          <label className="font-handwritten text-xs text-[#1a1a1a]/40 uppercase tracking-widest block mb-1.5">Recipient Address</label>
-                          <input
-                            type="text"
-                            placeholder="0x..."
-                            value={evmSendRecipient}
-                            onChange={(e) => { setEvmSendRecipient(e.target.value); setEvmSig1(null); setEvmSig2(null); setEvmSendNonce(null); }}
-                            disabled={evmSendStatus !== "idle"}
-                            className="w-full border-2 border-[#1a1a1a] rounded-sm px-3 py-2 font-mono text-sm bg-white placeholder:text-[#1a1a1a]/20 disabled:opacity-40"
-                          />
-                        </div>
-
-                        {/* Amount */}
-                        <div>
-                          <label className="font-handwritten text-xs text-[#1a1a1a]/40 uppercase tracking-widest block mb-1.5">Amount</label>
-                          <input
-                            type="number"
-                            placeholder="0.0"
-                            min="0"
-                            step="any"
-                            value={evmSendAmount}
-                            onChange={(e) => { setEvmSendAmount(e.target.value); setEvmSig1(null); setEvmSig2(null); setEvmSendNonce(null); }}
-                            disabled={evmSendStatus !== "idle"}
-                            className="w-full border-2 border-[#1a1a1a] rounded-sm px-3 py-2 font-body text-sm bg-white disabled:opacity-40"
-                          />
-                        </div>
-
-                        {evmSendError && (
-                          <p className="font-handwritten text-sm text-red-500">{evmSendError}</p>
-                        )}
-
-                        {/* Step 1: fetch nonce + K1 sign */}
-                        {!evmSig1 && (
-                          <button
-                            disabled={!evmSendRecipient || !evmSendAmount || evmSendStatus === "fetchNonce" || evmSendStatus === "signing1"}
-                            onClick={async () => {
-                              setEvmSendError("");
-                              if (!/^0x[0-9a-fA-F]{40}$/.test(evmSendRecipient)) {
-                                setEvmSendError("Invalid recipient address.");
-                                return;
-                              }
-                              const amt = parseFloat(evmSendAmount);
-                              if (isNaN(amt) || amt <= 0) {
-                                setEvmSendError("Invalid amount.");
-                                return;
-                              }
-                              try {
-                                setEvmSendStatus("fetchNonce");
-                                const r = await fetch(`/api/evm/vault-info?address=${encodeURIComponent(evmActiveAddress)}`);
-                                const d = await r.json() as { nonce?: string; error?: string };
-                                if (!r.ok || d.error) throw new Error(d.error || "Failed to fetch nonce.");
-                                const nonce = d.nonce!;
-                                setEvmSendNonce(nonce);
-
-                                const isEth = evmSendTokenId === "eth";
-                                const decimals = isEth ? 18 : (evmShield?.tokens.find(t => t.contract === evmSendTokenId)?.decimals ?? 18);
-                                const amountBig = parseTokenAmount(evmSendAmount, decimals);
-                                const txTo = isEth ? evmSendRecipient : evmSendTokenId;
-                                const txValue = isEth ? amountBig : 0n;
-                                const txData = isEth ? "0x" : encodeERC20Transfer(evmSendRecipient, amountBig);
-
-                                const safeTx = buildSafeTx({ to: txTo, value: txValue, data: txData, nonce });
-                                const typedData = buildTypedData(evmActiveAddress, 1, safeTx);
-
-                                setEvmSendStatus("signing1");
-                                const sig1 = await signTypedDataK1(typedData);
-                                setEvmSig1(sig1);
-                                setEvmSendStatus("idle");
-                              } catch (e: unknown) {
-                                setEvmSendError((e as Error).message || "Signing failed.");
-                                setEvmSendStatus("idle");
-                              }
-                            }}
-                            className="w-full py-3 border-2 border-[#1a1a1a] rounded-sm font-sketch text-base bg-white hover:bg-[#FAFAF5] transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-                          >
-                            {evmSendStatus === "fetchNonce" ? "Fetching nonce..." : evmSendStatus === "signing1" ? "Waiting for K1 signature..." : "Step 1 — Sign with K1"}
-                          </button>
-                        )}
-
-                        {/* K1 signed indicator */}
-                        {evmSig1 && (
-                          <div className="flex items-center gap-2 px-3 py-2 border border-green-300 bg-green-50 rounded-sm">
-                            <svg viewBox="0 0 16 16" fill="none" className="w-4 h-4 text-green-600 flex-shrink-0"><path d="M3 8.5L6.5 12L13 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                            <span className="font-handwritten text-sm text-green-700">K1 signed</span>
-                            <button onClick={() => { setEvmSig1(null); setEvmSig2(null); setEvmSendNonce(null); setEvmSendStatus("idle"); }} className="ml-auto font-handwritten text-xs text-[#1a1a1a]/30 hover:text-red-500">redo</button>
-                          </div>
-                        )}
-
-                        {/* Step 2: K2 sign */}
-                        {evmSig1 && !evmSig2 && (
-                          <button
-                            disabled={evmSendStatus === "signing2"}
-                            onClick={async () => {
-                              setEvmSendError("");
-                              try {
-                                const isEth = evmSendTokenId === "eth";
-                                const decimals = isEth ? 18 : (evmShield?.tokens.find(t => t.contract === evmSendTokenId)?.decimals ?? 18);
-                                const amountBig = parseTokenAmount(evmSendAmount, decimals);
-                                const txTo = isEth ? evmSendRecipient : evmSendTokenId;
-                                const txValue = isEth ? amountBig : 0n;
-                                const txData = isEth ? "0x" : encodeERC20Transfer(evmSendRecipient, amountBig);
-
-                                const safeTx = buildSafeTx({ to: txTo, value: txValue, data: txData, nonce: evmSendNonce! });
-                                const typedData = buildTypedData(evmActiveAddress, 1, safeTx);
-
-                                setEvmSendStatus("signing2");
-                                const sig2 = await signTypedDataK2(typedData);
-                                setEvmSig2(sig2);
-                                setEvmSendStatus("idle");
-                              } catch (e: unknown) {
-                                setEvmSendError((e as Error).message || "K2 signing failed.");
-                                setEvmSendStatus("idle");
-                              }
-                            }}
-                            className="w-full py-3 border-2 border-[#F7931A] rounded-sm font-sketch text-base bg-white hover:bg-[#F7931A]/5 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-                          >
-                            {evmSendStatus === "signing2" ? "Waiting for K2 signature..." : "Step 2 — Sign with K2"}
-                          </button>
-                        )}
-
-                        {/* K2 signed indicator */}
-                        {evmSig2 && (
-                          <div className="flex items-center gap-2 px-3 py-2 border border-green-300 bg-green-50 rounded-sm">
-                            <svg viewBox="0 0 16 16" fill="none" className="w-4 h-4 text-green-600 flex-shrink-0"><path d="M3 8.5L6.5 12L13 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                            <span className="font-handwritten text-sm text-green-700">K2 signed</span>
-                          </div>
-                        )}
-
-                        {/* Step 3: Execute */}
-                        {evmSig1 && evmSig2 && (
-                          <>
-                            <div className="flex items-center gap-2 px-3 py-2 border border-[#1a1a1a]/10 bg-[#FAFAF5] rounded-sm">
-                              <svg viewBox="0 0 16 16" fill="none" className="w-4 h-4 text-[#1a1a1a]/40 flex-shrink-0"><path d="M8 2v12M2 8h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
-                              <span className="font-handwritten text-xs text-[#1a1a1a]/40">K1 pays execution gas from MetaMask wallet (not the Qoin).</span>
-                            </div>
-                            <button
-                              disabled={evmSendStatus === "executing"}
-                              onClick={async () => {
-                                setEvmSendError("");
-                                try {
-                                  const isEth = evmSendTokenId === "eth";
-                                  const decimals = isEth ? 18 : (evmShield?.tokens.find(t => t.contract === evmSendTokenId)?.decimals ?? 18);
-                                  const amountBig = parseTokenAmount(evmSendAmount, decimals);
-                                  const txTo = isEth ? evmSendRecipient : evmSendTokenId;
-                                  const txValue = isEth ? amountBig : 0n;
-                                  const txData = isEth ? "0x" : encodeERC20Transfer(evmSendRecipient, amountBig);
-
-                                  const safeTx = buildSafeTx({ to: txTo, value: txValue, data: txData, nonce: evmSendNonce! });
-                                  const packed = packSignatures(evmSig1!, evmAddress1!, evmSig2!, evmAddress2!);
-                                  const calldata = encodeExecTransaction(safeTx, packed);
-
-                                  setEvmSendStatus("executing");
-                                  const txHash = await window.ethereum!.request({
-                                    method: "eth_sendTransaction",
-                                    params: [{
-                                      from: evmAddress1,
-                                      to: evmActiveAddress,
-                                      data: calldata,
-                                      gas: "0x7A120",
-                                    }],
-                                  }) as string;
-                                  setEvmSendTxHash(txHash);
-                                  setEvmSendStatus("done");
-                                } catch (e: unknown) {
-                                  setEvmSendError((e as Error).message || "Execution failed.");
-                                  setEvmSendStatus("idle");
-                                }
-                              }}
-                              className="btn-sketch w-full text-lg py-4"
-                            >
-                              {evmSendStatus === "executing" ? "Broadcasting..." : "Step 3 — Execute Transaction"}
-                            </button>
-                          </>
-                        )}
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
           </div>
         </div>
-      ) : (
+        );
+      })() : (
         <div className="flex flex-1 overflow-hidden">
 
           {/* LEFT SIDEBAR icon-only on mobile, full on md+ */}
@@ -1538,7 +1574,7 @@ export default function AccessVault() {
                     )}
                     <div className="hidden md:block min-w-0 flex-1">
                       <div className="flex items-baseline gap-1.5">
-                        <span className="font-body font-bold text-sm text-[#1a1a1a] truncate leading-none">{t.mint === WSOL_MINT ? "wSOL" : (t.symbol ?? t.name?.slice(0, 8) ?? "Token")}</span>
+                        <span className="font-body font-bold text-sm text-[#1a1a1a] truncate leading-none">{DISPLAY_SYMBOL[t.mint] ?? t.symbol ?? t.name?.slice(0, 8) ?? "Token"}</span>
                         {price && !t.isNft && <span className="font-mono text-xs text-[#F7931A] flex-shrink-0">{fmtPrice(price)}</span>}
                       </div>
                       <div className="font-mono text-xs text-[#1a1a1a]/50 mt-0.5 flex items-center gap-1.5">
@@ -1561,12 +1597,12 @@ export default function AccessVault() {
                 </div>
               )}
 
-              {/* Setup Slots banner — shown when there are locked tokens or no tokens at all */}
+              {/* Setup Slots banner sidebar — desktop only supplemental */}
               {activeShieldAddress && (shield.tokens.some(tk => tk.isLocked) || shield.tokens.length === 0) && !slotsDone && (
-                <div className="hidden md:block mx-3 mb-2 mt-1 border-2 border-[#F7931A]/50 bg-[#FFF8F0] rounded-sm p-3 space-y-2">
-                  <p className="font-body font-bold text-xs text-[#1a1a1a]">Setup Token Slots</p>
+                <div className="mx-3 mb-2 mt-1 border-2 border-[#F7931A]/50 bg-[#FFF8F0] rounded-sm p-3 space-y-2">
+                  <p className="font-body font-bold text-xs text-[#1a1a1a]">Setup Required</p>
                   <p className="font-handwritten text-xs text-[#1a1a1a]/60 leading-relaxed">
-                    Initialize deposit slots for popular tokens. Required before deposits can be sent from this Qoin.
+                    One-time setup needed before you can receive or send tokens.
                   </p>
                   {slotsError && <p className="font-handwritten text-xs text-[#F7931A]">{slotsError}</p>}
                   <button
@@ -1579,7 +1615,7 @@ export default function AccessVault() {
                 </div>
               )}
               {slotsDone && (
-                <div className="hidden md:block mx-3 mb-2 mt-1 border border-[#1a1a1a]/10 bg-[#FAFAF5] rounded-sm px-3 py-2">
+                <div className="mx-3 mb-2 mt-1 border border-[#1a1a1a]/10 bg-[#FAFAF5] rounded-sm px-3 py-2">
                   <p className="font-handwritten text-xs text-[#1a1a1a]/60">Slots ready. Deposits to this Qoin are now sendable.</p>
                 </div>
               )}
@@ -1607,7 +1643,7 @@ export default function AccessVault() {
                         )}
                         <div className="hidden md:block min-w-0 flex-1">
                           <div className="flex items-baseline gap-1.5">
-                            <span className="font-body font-bold text-sm text-[#1a1a1a] truncate leading-none">{meta?.symbol ?? t.symbol}</span>
+                            <span className="font-body font-bold text-sm text-[#1a1a1a] truncate leading-none">{DISPLAY_SYMBOL[t.mint] ?? meta?.symbol ?? t.symbol}</span>
                             {dexPrices[t.mint]?.price != null && <span className="font-mono text-xs text-[#F7931A] flex-shrink-0">{fmtPrice(dexPrices[t.mint].price)}</span>}
                           </div>
                           <div className="font-mono text-xs text-[#1a1a1a]/35 mt-0.5">0.00</div>
@@ -1804,14 +1840,44 @@ export default function AccessVault() {
                 </div>
               )}
 
+              {/* SETUP REQUIRED NOTICE — large, centered, mobile+desktop */}
+              {needsSetup && (
+                <div className="w-full border-2 border-[#F7931A] bg-[#FFF8F0] rounded-sm p-6 md:p-10 flex flex-col items-center text-center gap-5">
+                  <div className="w-14 h-14 rounded-full border-2 border-[#F7931A]/40 bg-white flex items-center justify-center">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><rect x="5" y="11" width="14" height="10" rx="2" stroke="#F7931A" strokeWidth="1.8"/><path d="M8 11V7a4 4 0 0 1 8 0v4" stroke="#F7931A" strokeWidth="1.8" strokeLinecap="round"/></svg>
+                  </div>
+                  <div>
+                    <p className="font-sketch text-2xl md:text-3xl text-[#1a1a1a] mb-2">Setup Required</p>
+                    <p className="font-body text-sm md:text-base text-[#1a1a1a]/60 max-w-sm leading-relaxed">
+                      Initialize token deposit slots before you can receive or send tokens. This is a one-time setup and is completely free.
+                    </p>
+                  </div>
+                  {slotsError && <p className="font-body text-sm text-[#F7931A]">{slotsError}</p>}
+                  <button
+                    onClick={handleSetupSlots}
+                    disabled={slotsLoading}
+                    className="w-full max-w-xs font-body font-bold text-base py-4 bg-[#F7931A] text-white rounded-sm hover:bg-[#e07d10] transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-[3px_3px_0_#1a1a1a]"
+                  >
+                    {slotsLoading ? "Setting up..." : "Setup Slots (Free)"}
+                  </button>
+                  {slotsDone && (
+                    <p className="font-body text-sm text-green-600">Slots ready. You can now receive tokens.</p>
+                  )}
+                </div>
+              )}
+
               {/* ACTION BUTTONS — Receive / Send */}
               <div className="flex gap-3">
                 <button
-                  onClick={() => setActiveTab(activeTab === "receive" ? null : "receive")}
+                  onClick={() => { if (!needsSetup) setActiveTab(activeTab === "receive" ? null : "receive"); }}
+                  disabled={needsSetup}
+                  title={needsSetup ? "Setup token slots first" : undefined}
                   className={`flex-1 py-4 font-body font-bold text-base rounded-sm border-2 transition-all flex items-center justify-center gap-2 ${
-                    activeTab === "receive"
-                      ? "border-[#1a1a1a] bg-[#1a1a1a] text-white"
-                      : "border-[#1a1a1a] bg-white text-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-white"
+                    needsSetup
+                      ? "border-[#1a1a1a]/20 bg-[#1a1a1a]/5 text-[#1a1a1a]/25 cursor-not-allowed"
+                      : activeTab === "receive"
+                        ? "border-[#1a1a1a] bg-[#1a1a1a] text-white"
+                        : "border-[#1a1a1a] bg-white text-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-white"
                   }`}
                 >
                   <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2v9M4 7l4 4 4-4M2 13h12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
@@ -1942,9 +2008,9 @@ export default function AccessVault() {
                               ) : (
                                 <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: phantom2Pubkey ? "#F7931A" : "#1a1a1a", opacity: phantom2Pubkey ? 1 : 0.15 }} />
                               )}
-                              <img src="/phantom-logo.png" className="w-5 h-5 rounded-lg flex-shrink-0" alt="Phantom K2" />
-                              <span className="font-body font-bold text-xs text-[#1a1a1a]/60">Phantom K2</span>
-                              {txLoading && signingStep === "solflare" && <span className="font-handwritten text-xs text-[#F7931A]">Approve in Phantom (K2)</span>}
+                              <img src="/solflare-logo.png" className="w-5 h-5 rounded-lg flex-shrink-0" alt="Solflare K2" />
+                              <span className="font-body font-bold text-xs text-[#1a1a1a]/60">Solflare (Key 2)</span>
+                              {txLoading && signingStep === "solflare" && <span className="font-handwritten text-xs text-[#F7931A]">Approve in Solflare</span>}
                               {signingStep === "broadcasting" && <span className="font-handwritten text-xs text-green-600">Signed</span>}
                             </div>
                             {phantom2Pubkey ? (
@@ -1954,7 +2020,7 @@ export default function AccessVault() {
                             )}
                           </div>
                           <p className="font-handwritten text-xs text-[#1a1a1a]/25 pt-0.5">
-                            Phantom K1 signs first, then Phantom K2. Two separate approvals. One transaction on-chain.
+                            Phantom signs first, then Solflare. Two separate approvals. One transaction on-chain.
                           </p>
                         </div>
                       </div>
@@ -2012,7 +2078,7 @@ export default function AccessVault() {
                           <div>
                             <label className="font-handwritten text-xs text-[#1a1a1a]/40 uppercase tracking-wide mb-1.5 block">
                               Amount
-                              <span className="ml-2 text-[#1a1a1a]/25 normal-case">balance: {(selHeld?.balance ?? 0).toLocaleString()} {selHeld?.symbol ?? selLabel}</span>
+                              <span className="ml-2 text-[#1a1a1a]/25 normal-case">balance: {(selHeld?.balance ?? 0).toLocaleString()} {selLabel}</span>
                             </label>
                             <div className="flex gap-2">
                               <input type="number" placeholder="0.00" value={amount} onChange={(e) => setAmount(e.target.value)} min="0" disabled={!canSend || !selHeld} className="input-sketch text-sm py-2.5 flex-1 disabled:opacity-30" />
