@@ -484,6 +484,6 @@ export function explorerUrl(sig: string, _devnet: boolean): string {
   return `https://orbmarkets.io/tx/${sig}?tab=summary`;
 }
 
-export function explorerAddressUrl(address: string, _devnet: boolean): string {
+export function explorerAddressUrl(address: string, _devnet = false): string {
   return `https://orbmarkets.io/address/${address}/history`;
 }
