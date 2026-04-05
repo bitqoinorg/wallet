@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { useLocation } from "wouter";
+import { AnimatePresence } from "framer-motion";
 import { isValidPublicKey, explorerAddressUrl } from "@/lib/solana";
 import {
   SketchAtom, SketchShield, SketchTwoKeys, SketchLock,
@@ -8,10 +9,64 @@ import {
 } from "@/components/sketches";
 import Navbar from "@/components/Navbar";
 import { useApp } from "@/contexts/AppContext";
+import HowItWorksModal from "@/components/HowItWorksModal";
 
-const TREASURY_VAULT = "6TkW8UojBM9g9uanoSGHzm24DJwmu8333yaBMHbrGKR5";
+const SOL_VAULT = "6TkW8UojBM9g9uanoSGHzm24DJwmu8333yaBMHbrGKR5";
 const TREASURY_DEVNET = false;
-const PUBLIC_CHALLENGE_KEY = "6TkW8UojBM9g9uanoSGHzm24DJwmu8333yaBMHbrGKR5";
+const EVM_VAULT = "0x0000000000000000000000000000000000000000";
+
+const SOL_K1_KEY = "FNBTMRNyuYxPaFHSCZosmGqWLMcDQiVGLwbGGSgNnzmo";
+const EVM_K1_KEY = "0x0000000000000000000000000000000000000000000000000000000000000001";
+
+function BalancePanel({
+  loading, error, onRetry,
+  nativeBalance, nativeSymbol, nativeLabel,
+  tokens, vault, explorerUrl, dark, mutedText,
+}: {
+  loading: boolean;
+  error: string;
+  onRetry: () => void;
+  nativeBalance: number | null;
+  nativeSymbol: string;
+  nativeLabel: string;
+  tokens: Array<{ symbol: string; name: string; balance: number; logo: string | null }>;
+  vault: string;
+  explorerUrl: string;
+  dark: boolean;
+  mutedText: string;
+}) {
+  const text = dark ? "text-[#FAFAF5]" : "text-[#1a1a1a]";
+  if (loading) {
+    return <div className={`font-handwritten text-base animate-pulse py-4 ${mutedText}`}>Fetching...</div>;
+  }
+  if (error) {
+    return (
+      <div>
+        <div className="font-handwritten text-sm text-red-400 mb-3">{error}</div>
+        <button onClick={onRetry} className={`font-body font-bold text-xs px-3 py-1.5 border ${dark ? "border-[#FAFAF5]/20 text-[#FAFAF5]/50" : "border-[#1a1a1a]/20 text-[#1a1a1a]/50"} hover:border-[#F7931A] hover:text-[#F7931A] transition-colors`}>Retry</button>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <div className={`border ${dark ? "border-[#FAFAF5]/10 bg-[#0f0f0f]" : "border-[#1a1a1a]/10 bg-[#f5f5f0]"} p-3 mb-3 flex items-center justify-between`}>
+        <span className={`font-handwritten text-sm ${mutedText}`}>{nativeLabel}</span>
+        <span className={`font-sketch text-lg ${text}`}>{nativeBalance !== null ? nativeBalance.toFixed(6) : "0"} {nativeSymbol}</span>
+      </div>
+      {tokens.length > 0 && tokens.map((tk) => (
+        <div key={tk.symbol} className={`border ${dark ? "border-[#FAFAF5]/10 bg-[#0f0f0f]" : "border-[#1a1a1a]/10 bg-[#f5f5f0]"} p-3 mb-2 flex items-center gap-2`}>
+          {tk.logo && <img src={tk.logo} alt={tk.symbol} className="w-5 h-5 rounded-full flex-shrink-0" />}
+          <span className={`font-handwritten text-sm flex-1 ${mutedText}`}>{tk.name}</span>
+          <span className={`font-sketch text-base ${text}`}>{tk.balance.toLocaleString()} {tk.symbol}</span>
+        </div>
+      ))}
+      <div className={`font-mono text-xs break-all p-2 border mb-2 ${dark ? "border-[#FAFAF5]/10 bg-[#0f0f0f] text-[#FAFAF5]/40" : "border-[#1a1a1a]/10 bg-[#f5f5f0] text-[#888]"}`}>{vault}</div>
+      <a href={explorerUrl} target="_blank" rel="noopener noreferrer" className="font-handwritten text-sm text-[#F7931A] hover:underline">
+        View on explorer →
+      </a>
+    </div>
+  );
+}
 
 export default function Landing() {
   const [, navigate] = useLocation();
@@ -20,15 +75,23 @@ export default function Landing() {
   const [treasuryTokens, setTreasuryTokens] = useState<Array<{ mint: string; balance: number; name: string | null; symbol: string | null; logo: string | null }>>([]);
   const [treasuryLoading, setTreasuryLoading] = useState(true);
   const [treasuryError, setTreasuryError] = useState("");
-  const [challengeCopied, setChallengeCopied] = useState(false);
+  const [evmEth, setEvmEth] = useState<number | null>(null);
+  const [evmTokens, setEvmTokens] = useState<Array<{ contract: string; name: string; symbol: string; balance: number; logo: string }>>([]);
+  const [evmLoading, setEvmLoading] = useState(true);
+  const [evmError, setEvmError] = useState("");
+  const [balanceTab, setBalanceTab] = useState<"eth" | "sol">("eth");
+  const [challengeTab, setChallengeTab] = useState<"evm" | "sol">("evm");
+  const [evmKeyCopied, setEvmKeyCopied] = useState(false);
+  const [solKeyCopied, setSolKeyCopied] = useState(false);
 
   const [openFaq, setOpenFaq] = useState<number | null>(null);
+  const [showVideo, setShowVideo] = useState(false);
 
   const fetchTreasury = useCallback(async () => {
     setTreasuryLoading(true);
     setTreasuryError("");
     try {
-      const res = await fetch(`/api/qoin/balance?address=${TREASURY_VAULT}`);
+      const res = await fetch(`/api/qoin/balance?address=${SOL_VAULT}`);
       if (!res.ok) throw new Error("API error");
       const data = await res.json() as { solBalance: number; tokens: Array<{ mint: string; balance: number; name: string | null; symbol: string | null; logo: string | null }> };
       setTreasurySol(data.solBalance);
@@ -40,7 +103,23 @@ export default function Landing() {
     }
   }, []);
 
-  useEffect(() => { fetchTreasury(); }, [fetchTreasury]);
+  const fetchEvmTreasury = useCallback(async () => {
+    setEvmLoading(true);
+    setEvmError("");
+    try {
+      const res = await fetch(`/api/evm/balance?address=${EVM_VAULT}`);
+      if (!res.ok) throw new Error("API error");
+      const data = await res.json() as { ethBalance: number; ethLogo: string; tokens: Array<{ contract: string; name: string; symbol: string; balance: number; logo: string }> };
+      setEvmEth(data.ethBalance);
+      setEvmTokens(data.tokens);
+    } catch {
+      setEvmError("Could not reach Ethereum network. Try refreshing.");
+    } finally {
+      setEvmLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchTreasury(); fetchEvmTreasury(); }, [fetchTreasury, fetchEvmTreasury]);
 
   const bg = dark ? "bg-[#0f0f0f] text-[#FAFAF5]" : "bg-[#FAFAF5] text-[#1a1a1a]";
   const cardBg = dark ? "bg-[#1a1a1a] border-[#FAFAF5]/10" : "bg-white border-[#1a1a1a]";
@@ -63,7 +142,7 @@ export default function Landing() {
           {t.hero.line3}
         </h1>
         <SketchWave className="w-48 mx-auto mb-8" />
-        <p className={`text-xl md:text-2xl leading-relaxed mb-4 max-w-2xl mx-auto ${mutedText2}`}>
+        <p className={`text-xl md:text-2xl leading-relaxed mb-4 max-w-4xl mx-auto ${mutedText2}`}>
           {t.hero.body}
         </p>
         <p className="font-handwritten text-2xl text-[#F7931A] mb-10">
@@ -77,7 +156,7 @@ export default function Landing() {
             {t.hero.ctaOpen}
           </button>
           <button
-            onClick={() => navigate("/how/start")}
+            onClick={() => setShowVideo(true)}
             className={`font-body font-bold text-base transition-colors flex items-center gap-2 ${dark ? "text-[#FAFAF5]/50 hover:text-[#F7931A]" : "text-[#1a1a1a]/50 hover:text-[#F7931A]"}`}
           >
             <span className={`w-9 h-9 rounded-full border-2 flex items-center justify-center text-sm ${dark ? "border-[#FAFAF5]/20" : "border-[#1a1a1a]/20"}`}>▶</span>
@@ -112,109 +191,208 @@ export default function Landing() {
             <div className="badge-sketch-orange mb-4">{t.proof.badge}</div>
             <h2 className="font-sketch text-4xl mb-4">{t.proof.title}</h2>
             <SketchWave className="w-40 mb-4" />
-            <p className={`text-xl max-w-2xl ${mutedText}`}>{t.proof.body}</p>
+            <p className={`text-xl max-w-4xl ${mutedText}`}>{t.proof.body}</p>
           </div>
 
           <div className="grid md:grid-cols-2 gap-6 items-start">
 
-            {/* PUBLIC CHALLENGE KEY */}
-            <div className={`border-2 ${cardBg} ${cardShadow} rounded-sm p-8`}>
-              <div className="flex items-center gap-3 mb-4">
-                <SketchWarning className="w-10 h-10" />
-                <div>
-                  <div className="font-sketch text-2xl">{t.proof.key1Title}</div>
-                  <div className={`font-handwritten text-lg ${mutedText}`}>{t.proof.key1Sub}</div>
+            {/* HACK CHALLENGE — tabs on mobile, side-by-side on desktop */}
+            <div className={`border-2 ${cardBg} ${cardShadow} rounded-sm overflow-hidden`}>
+              <div className="p-6 pb-0">
+                <div className="flex items-center gap-3 mb-5">
+                  <SketchWarning className="w-9 h-9 flex-shrink-0" />
+                  <div>
+                    <div className="font-sketch text-xl">Key 1 Private Keys Published.</div>
+                    <div className={`font-handwritten text-base ${mutedText}`}>One per chain. Both vaults still locked.</div>
+                  </div>
+                </div>
+
+                {/* Mobile tabs */}
+                <div className={`flex md:hidden border-2 ${dark ? "border-[#FAFAF5]/10" : "border-[#1a1a1a]"} mb-4`}>
+                  {(["evm", "sol"] as const).map((tab) => (
+                    <button
+                      key={tab}
+                      onClick={() => setChallengeTab(tab)}
+                      className={`flex-1 py-2.5 font-sketch text-base transition-colors ${
+                        challengeTab === tab
+                          ? "bg-[#F7931A] text-white"
+                          : dark
+                          ? "text-[#FAFAF5]/40 hover:text-[#FAFAF5]"
+                          : "text-[#1a1a1a]/40 hover:text-[#1a1a1a]"
+                      }`}
+                    >
+                      {tab === "evm" ? "Ethereum" : "Solana"}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Desktop column headers */}
+                <div className={`hidden md:grid grid-cols-2 gap-4 mb-4`}>
+                  {["Ethereum", "Solana"].map((label) => (
+                    <div key={label} className={`font-sketch text-lg pb-2 border-b-2 ${dark ? "border-[#FAFAF5]/10" : "border-[#1a1a1a]/10"}`}>
+                      {label}
+                    </div>
+                  ))}
                 </div>
               </div>
 
-              <div className="bg-[#F7931A] border-2 border-[#1a1a1a] rounded-sm p-4 mb-4">
-                <div className="font-handwritten text-sm text-white/80 uppercase tracking-wide mb-2">{t.proof.pubKeyLabel}</div>
-                <div className="font-mono text-sm text-white break-all leading-relaxed">{PUBLIC_CHALLENGE_KEY}</div>
+              {/* Mobile: single active panel */}
+              <div className="md:hidden px-6 pb-6">
+                {(["evm", "sol"] as const).map((tab) => {
+                  const k1 = tab === "evm" ? EVM_K1_KEY : SOL_K1_KEY;
+                  const copied = tab === "evm" ? evmKeyCopied : solKeyCopied;
+                  const setCopied = tab === "evm"
+                    ? (v: boolean) => setEvmKeyCopied(v)
+                    : (v: boolean) => setSolKeyCopied(v);
+                  if (tab !== challengeTab) return null;
+                  return (
+                    <div key={tab}>
+                      <div className="bg-[#F7931A] border-2 border-[#1a1a1a] rounded-sm p-4 mb-3">
+                        <div className="font-handwritten text-xs text-white/70 uppercase tracking-wide mb-1.5">Private Key (Key 1)</div>
+                        <div className="font-mono text-xs text-white break-all leading-relaxed">{k1}</div>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          await navigator.clipboard.writeText(k1);
+                          setCopied(true);
+                          setTimeout(() => setCopied(false), 2000);
+                        }}
+                        className="btn-sketch-outline w-full py-2.5 text-sm mb-3"
+                      >
+                        {copied ? "Copied. Good luck." : "Copy Private Key"}
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
 
-              <button
-                onClick={async () => {
-                  await navigator.clipboard.writeText(PUBLIC_CHALLENGE_KEY);
-                  setChallengeCopied(true);
-                  setTimeout(() => setChallengeCopied(false), 2000);
-                }}
-                className="btn-sketch-outline w-full py-3 text-base mb-4"
-              >
-                {challengeCopied ? t.proof.copiedBtn : t.proof.copyBtn}
-              </button>
+              {/* Desktop: both panels side by side */}
+              <div className="hidden md:grid grid-cols-2 gap-4 px-6 pb-6">
+                {(["evm", "sol"] as const).map((tab) => {
+                  const k1 = tab === "evm" ? EVM_K1_KEY : SOL_K1_KEY;
+                  const copied = tab === "evm" ? evmKeyCopied : solKeyCopied;
+                  const setCopied = tab === "evm"
+                    ? (v: boolean) => setEvmKeyCopied(v)
+                    : (v: boolean) => setSolKeyCopied(v);
+                  return (
+                    <div key={tab}>
+                      <div className="bg-[#F7931A] border-2 border-[#1a1a1a] rounded-sm p-3 mb-3">
+                        <div className="font-handwritten text-xs text-white/70 uppercase tracking-wide mb-1.5">Private Key (Key 1)</div>
+                        <div className="font-mono text-xs text-white break-all leading-relaxed">{k1}</div>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          await navigator.clipboard.writeText(k1);
+                          setCopied(true);
+                          setTimeout(() => setCopied(false), 2000);
+                        }}
+                        className="btn-sketch-outline w-full py-2.5 text-sm"
+                      >
+                        {copied ? "Copied. Good luck." : "Copy Private Key"}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
 
-              <div className="grid md:grid-cols-3 gap-4 text-center">
+              <div className={`px-6 pb-6 grid grid-cols-3 gap-3 text-center border-t ${dark ? "border-[#FAFAF5]/10" : "border-[#1a1a1a]/10"} pt-4`}>
                 {[
-                  { label: t.proof.statsPublished, value: "1", color: "#F7931A" },
-                  { label: t.proof.statsNeeded, value: "Both", color: "#ef4444" },
-                  { label: t.proof.statsYouHave, value: "1", color: "#888" },
+                  { label: "Keys Published", value: "1+1", color: "#F7931A" },
+                  { label: "Keys Needed Each", value: "2", color: "#ef4444" },
+                  { label: "Successful Hacks", value: "0", color: "#888" },
                 ].map((item) => (
                   <div key={item.label} className={`border rounded-sm p-3 ${dark ? "border-[#FAFAF5]/10" : "border-[#eee]"}`}>
                     <div className="font-sketch text-2xl" style={{ color: item.color }}>{item.value}</div>
-                    <div className={`font-handwritten text-base ${mutedText}`}>{item.label}</div>
+                    <div className={`font-handwritten text-sm ${mutedText}`}>{item.label}</div>
                   </div>
                 ))}
               </div>
 
-              <p className={`font-handwritten text-lg mt-4 italic ${mutedText}`}>
-                {t.proof.cannotMove}
-              </p>
+              <div className="px-6 pb-6">
+                <p className={`font-handwritten text-base italic ${mutedText}`}>
+                  {t.proof.cannotMove}
+                </p>
+              </div>
             </div>
 
-            {/* LIVE BALANCE */}
-            <div className={`flex flex-col gap-6`}>
-              <div className={`${dark ? "border-2 border-[#FAFAF5]/10 bg-[#1a1a1a]" : "sketch-card"} p-8`}>
-                <div className="font-sketch text-2xl mb-2">{t.proof.liveTitle}</div>
-                <p className={`font-handwritten text-lg mb-5 ${mutedText}`}>{t.proof.liveSub}</p>
+            {/* LIVE BALANCE — dual chain */}
+            <div className={`${dark ? "border-2 border-[#FAFAF5]/10 bg-[#1a1a1a]" : "sketch-card"} overflow-hidden`}>
+              <div className="p-6 pb-0">
+                <div className="font-sketch text-2xl mb-1">{t.proof.liveTitle}</div>
+                <p className={`font-handwritten text-base mb-4 ${mutedText}`}>{t.proof.liveSub}</p>
 
-                {treasuryLoading && (
-                  <div className="text-center py-6">
-                    <div className={`font-handwritten text-xl animate-pulse ${mutedText}`}>{t.proof.fetchingRpc}</div>
-                  </div>
-                )}
-
-                {treasuryError && (
-                  <div className="font-body font-bold text-sm p-3 border border-red-400/30 mb-4" style={{ color: "#ef4444" }}>{treasuryError}</div>
-                )}
-
-                {!treasuryLoading && treasurySol !== null && (
-                  <div>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
-                      <div className={`${dark ? "border border-[#FAFAF5]/10 bg-[#0f0f0f]" : "sketch-card"} p-5 text-center`}>
-                        <div className={`font-sketch text-3xl ${dark ? "text-[#FAFAF5]" : "text-[#1a1a1a]"}`}>{treasurySol.toFixed(4)}</div>
-                        <div className={`font-handwritten text-lg ${mutedText}`}>{t.proof.solBalance}</div>
-                      </div>
-                      <div className={`${dark ? "border border-[#FAFAF5]/10 bg-[#0f0f0f]" : "sketch-card"} p-5 text-center`}>
-                        <div className="font-sketch text-3xl text-[#F7931A]">
-                          {treasuryTokens.length > 0 ? treasuryTokens[0].balance.toLocaleString() : "0"}
-                        </div>
-                        <div className={`font-handwritten text-lg ${mutedText}`}>{t.proof.holdings}</div>
-                      </div>
-                      <div className={`${dark ? "border border-[#F7931A]/30 bg-[#F7931A]/5" : "sketch-card-orange"} p-5 text-center`}>
-                        <div className="font-sketch text-xl text-[#F7931A]">IN QOINHOLD</div>
-                        <div className={`font-handwritten text-lg ${mutedText}`}>{t.proof.qoinjointLock}</div>
-                      </div>
-                    </div>
-                    <div className={`font-mono text-sm mb-2 ${mutedText}`}>{t.proof.qoinAddress}</div>
-                    <div className={`${dark ? "border border-[#FAFAF5]/10 bg-[#0f0f0f] text-[#FAFAF5]/60" : "code-sketch text-[#888]"} font-mono text-xs p-2 mb-3 break-all`}>
-                      {TREASURY_VAULT}
-                    </div>
-                    <a
-                      href={explorerAddressUrl(TREASURY_VAULT, TREASURY_DEVNET)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="font-handwritten text-lg text-[#F7931A] hover:underline block"
+                {/* Mobile tabs */}
+                <div className={`flex md:hidden border-2 ${dark ? "border-[#FAFAF5]/10" : "border-[#1a1a1a]"} mb-4`}>
+                  {(["eth", "sol"] as const).map((tab) => (
+                    <button
+                      key={tab}
+                      onClick={() => setBalanceTab(tab)}
+                      className={`flex-1 py-2.5 font-sketch text-base transition-colors ${
+                        balanceTab === tab
+                          ? "bg-[#F7931A] text-white"
+                          : dark ? "text-[#FAFAF5]/40 hover:text-[#FAFAF5]" : "text-[#1a1a1a]/40 hover:text-[#1a1a1a]"
+                      }`}
                     >
-                      {t.proof.verifyBtn}
-                    </a>
-                  </div>
-                )}
+                      {tab === "eth" ? "Ethereum" : "Solana"}
+                    </button>
+                  ))}
+                </div>
 
-                {!treasuryLoading && treasurySol === null && !treasuryError && (
-                  <button onClick={fetchTreasury} className="btn-sketch w-full py-3 text-base">
-                    {t.proof.reloadBtn}
-                  </button>
+                {/* Desktop column headers */}
+                <div className={`hidden md:grid grid-cols-2 gap-4 mb-4`}>
+                  {["Ethereum", "Solana"].map((label) => (
+                    <div key={label} className={`font-sketch text-lg pb-2 border-b-2 ${dark ? "border-[#FAFAF5]/10" : "border-[#1a1a1a]/10"}`}>
+                      {label}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Mobile: single active panel */}
+              <div className="md:hidden px-6 pb-6">
+                {balanceTab === "eth" ? (
+                  <BalancePanel
+                    loading={evmLoading} error={evmError}
+                    onRetry={fetchEvmTreasury}
+                    nativeBalance={evmEth} nativeSymbol="ETH" nativeLabel="ETH Balance"
+                    tokens={evmTokens.filter(tk => tk.balance > 0).map(tk => ({ symbol: tk.symbol, name: tk.name, balance: tk.balance, logo: tk.logo }))}
+                    vault={EVM_VAULT}
+                    explorerUrl={`https://etherscan.io/address/${EVM_VAULT}`}
+                    dark={dark} mutedText={mutedText}
+                  />
+                ) : (
+                  <BalancePanel
+                    loading={treasuryLoading} error={treasuryError}
+                    onRetry={fetchTreasury}
+                    nativeBalance={treasurySol} nativeSymbol="SOL" nativeLabel="SOL Balance"
+                    tokens={treasuryTokens.filter(tk => tk.balance > 0).map(tk => ({ symbol: tk.symbol ?? tk.mint.slice(0,6), name: tk.name ?? tk.symbol ?? "Token", balance: tk.balance, logo: tk.logo ?? null }))}
+                    vault={SOL_VAULT}
+                    explorerUrl={explorerAddressUrl(SOL_VAULT, TREASURY_DEVNET)}
+                    dark={dark} mutedText={mutedText}
+                  />
                 )}
+              </div>
+
+              {/* Desktop: both panels side by side */}
+              <div className="hidden md:grid grid-cols-2 gap-4 px-6 pb-6">
+                <BalancePanel
+                  loading={evmLoading} error={evmError}
+                  onRetry={fetchEvmTreasury}
+                  nativeBalance={evmEth} nativeSymbol="ETH" nativeLabel="ETH Balance"
+                  tokens={evmTokens.filter(tk => tk.balance > 0).map(tk => ({ symbol: tk.symbol, name: tk.name, balance: tk.balance, logo: tk.logo }))}
+                  vault={EVM_VAULT}
+                  explorerUrl={`https://etherscan.io/address/${EVM_VAULT}`}
+                  dark={dark} mutedText={mutedText}
+                />
+                <BalancePanel
+                  loading={treasuryLoading} error={treasuryError}
+                  onRetry={fetchTreasury}
+                  nativeBalance={treasurySol} nativeSymbol="SOL" nativeLabel="SOL Balance"
+                  tokens={treasuryTokens.filter(tk => tk.balance > 0).map(tk => ({ symbol: tk.symbol ?? tk.mint.slice(0,6), name: tk.name ?? tk.symbol ?? "Token", balance: tk.balance, logo: tk.logo ?? null }))}
+                  vault={SOL_VAULT}
+                  explorerUrl={explorerAddressUrl(SOL_VAULT, TREASURY_DEVNET)}
+                  dark={dark} mutedText={mutedText}
+                />
               </div>
             </div>
           </div>
@@ -296,7 +474,7 @@ export default function Landing() {
           <div className="text-center mb-16">
             <div className="inline-block border border-[#F7931A] text-[#F7931A] font-handwritten text-sm px-3 py-1 mb-4 uppercase tracking-widest">{t.how.badge}</div>
             <h2 className="font-sketch text-4xl mb-4 text-white">{t.how.title}</h2>
-            <p className="text-lg text-white/50 max-w-xl mx-auto">{t.how.body}</p>
+            <p className="text-lg text-white/50 max-w-3xl mx-auto">{t.how.body}</p>
           </div>
           <div className="grid md:grid-cols-3 gap-6">
             {[
@@ -433,7 +611,7 @@ export default function Landing() {
           <h2 className="font-sketch text-5xl mb-6 text-white">
             {t.hero.ctaCreate}
           </h2>
-          <p className="text-xl text-white/50 mb-10 max-w-xl mx-auto">
+          <p className="text-xl text-white/50 mb-10 max-w-4xl mx-auto">
             {t.hero.body}
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -451,21 +629,48 @@ export default function Landing() {
       </section>
 
       {/* FOOTER */}
-      <footer className="bg-[#1a1a1a] border-t border-white/10 py-10">
-        <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-6">
-          <div className="flex items-center gap-2">
-            <SketchCoin className="w-7 h-7" />
-            <span className="font-body font-bold text-lg text-white">bitQoin</span>
+      <footer className="bg-[#1a1a1a] border-t border-white/10">
+        <div className="max-w-7xl mx-auto px-6 py-12">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
+            {/* Brand */}
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center gap-2">
+                <SketchCoin className="w-7 h-7" />
+                <span className="font-body font-bold text-lg text-white">bitQoin</span>
+              </div>
+              <p className="font-body text-sm text-white/40 leading-relaxed">
+                Quantum-resistant multi-chain protection for your digital assets. Built on Solana and Ethereum.
+              </p>
+            </div>
+            {/* Navigation */}
+            <div className="flex flex-col gap-3">
+              <span className="font-body font-bold text-xs text-white/30 uppercase tracking-widest">Product</span>
+              <div className="flex flex-col gap-2">
+                <a onClick={() => navigate("/how/start")} className="font-body text-sm text-white/50 hover:text-[#F7931A] transition-colors cursor-pointer">Getting Started</a>
+                <a onClick={() => navigate("/how/protocol")} className="font-body text-sm text-white/50 hover:text-[#F7931A] transition-colors cursor-pointer">Qonjoint Protocol</a>
+                <a onClick={() => navigate("/proof/balance")} className="font-body text-sm text-white/50 hover:text-[#F7931A] transition-colors cursor-pointer">Live Balance Proof</a>
+                <a onClick={() => navigate("/faq")} className="font-body text-sm text-white/50 hover:text-[#F7931A] transition-colors cursor-pointer">FAQ</a>
+              </div>
+            </div>
+            {/* Links */}
+            <div className="flex flex-col gap-3">
+              <span className="font-body font-bold text-xs text-white/30 uppercase tracking-widest">Connect</span>
+              <div className="flex flex-col gap-2">
+                <a href="https://github.com/bitqoinorg" target="_blank" rel="noopener noreferrer" className="font-body text-sm text-white/50 hover:text-[#F7931A] transition-colors">GitHub</a>
+                <a href="https://x.com/thebitcoin" target="_blank" rel="noopener noreferrer" className="font-body text-sm text-white/50 hover:text-[#F7931A] transition-colors">𝕏 (Twitter)</a>
+              </div>
+            </div>
           </div>
-          <p className="font-handwritten text-base text-white/30 text-center max-w-md">
-            This is a memecoin. We are not financial advisors. We are, however, very enthusiastic about cryptography and making it very hard for people to steal things. DYOR. Not financial advice.
-          </p>
-          <div className="flex items-center gap-4">
-            <a href="https://github.com/bitqoinorg" target="_blank" rel="noopener noreferrer" className="font-handwritten text-base text-white/30 hover:text-[#F7931A] transition-colors">GitHub</a>
-            <a href="https://x.com/thebitcoin" target="_blank" rel="noopener noreferrer" className="font-body font-bold text-sm text-white/30 hover:text-[#F7931A] transition-colors">𝕏</a>
+          <div className="border-t border-white/10 mt-10 pt-6 flex flex-col md:flex-row items-center justify-between gap-4">
+            <span className="font-body text-xs text-white/20">&copy; {new Date().getFullYear()} bitQoin. All rights reserved.</span>
+            <span className="font-body text-xs text-white/20">Powered by Qonjoint Protocol</span>
           </div>
         </div>
       </footer>
+
+      <AnimatePresence>
+        {showVideo && <HowItWorksModal onClose={() => setShowVideo(false)} />}
+      </AnimatePresence>
     </div>
   );
 }
