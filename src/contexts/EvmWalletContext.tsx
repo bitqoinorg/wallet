@@ -28,7 +28,10 @@ interface EIP6963AnnounceEvent extends Event {
 // MetaMask's official reverse-DNS identifier
 const METAMASK_RDNS = "io.metamask";
 
-// ── EIP-6963 discovery ────────────────────────────────────────────────────────
+// ── Wallet discovery: EIP-6963 first, then window.ethereum fallback ───────────
+// EIP-6963 catches the MetaMask desktop extension.
+// window.ethereum fallback catches any injected wallet:
+//   MetaMask Mobile in-app browser, Coinbase Wallet, Trust Wallet, etc.
 function discoverMetaMask(): Promise<EIP6963Provider> {
   return new Promise((resolve, reject) => {
     const found: EIP6963Provider[] = [];
@@ -43,11 +46,20 @@ function discoverMetaMask(): Promise<EIP6963Provider> {
     window.addEventListener("eip6963:announceProvider", handler as EventListener);
     window.dispatchEvent(new Event("eip6963:requestProvider"));
 
-    // Give wallets 300 ms to announce themselves
+    // Give wallets 300 ms to announce themselves via EIP-6963
     setTimeout(() => {
       window.removeEventListener("eip6963:announceProvider", handler as EventListener);
-      if (found.length > 0) resolve(found[0]);
-      else reject(new Error("MetaMask not found. Make sure MetaMask is installed and enabled."));
+      if (found.length > 0) {
+        resolve(found[0]);
+      } else if ((window as { ethereum?: EIP6963Provider }).ethereum) {
+        // Fallback: injected provider from any wallet browser (mobile-friendly)
+        resolve((window as { ethereum?: EIP6963Provider }).ethereum as EIP6963Provider);
+      } else {
+        reject(new Error(
+          "No Ethereum wallet detected. On desktop, install the MetaMask extension. " +
+          "On mobile, open this site inside the MetaMask, Coinbase Wallet, or Trust Wallet in-app browser."
+        ));
+      }
     }, 300);
   });
 }
