@@ -4,7 +4,8 @@ import {
   generateKeypair,
   explorerUrl,
 } from "@/lib/solana";
-import { saveVaultAssociation, saveEvmVaultAssociation } from "@/lib/vaultStore";
+import { generateEvmKeypair } from "@/lib/evm";
+import { saveVaultAssociation, saveEvmVaultAssociation, lookupVaultByPublicKey, lookupEvmVaultByAddress } from "@/lib/vaultStore";
 import {
   SketchKey, SketchTwoKeys, SketchLock,
   SketchWarning, SketchWave, SketchAtom, SketchShield
@@ -69,14 +70,59 @@ export default function GenerateVault() {
   const [evmVaultTxHash, setEvmVaultTxHash] = useState("");
   const [openAccordion, setOpenAccordion] = useState<string | null>(null);
   const [savedChecked, setSavedChecked] = useState(false);
+  const [showMobileNotice, setShowMobileNotice] = useState(false);
+  const [mobileLinkCopied, setMobileLinkCopied] = useState(false);
+
+  function isMobileDevice() {
+    return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  }
+
+  function isWalletBrowser() {
+    return typeof (window as { ethereum?: unknown }).ethereum !== "undefined";
+  }
+
+  async function handleConnectK1() {
+    if (isMobileDevice() && !isWalletBrowser()) {
+      setShowMobileNotice(true);
+      return;
+    }
+    await connectK1();
+  }
+
+  async function handleConnectK2() {
+    if (isMobileDevice() && !isWalletBrowser()) {
+      setShowMobileNotice(true);
+      return;
+    }
+    await connectK2();
+  }
+
+  async function copyMobileLink() {
+    await navigator.clipboard.writeText(window.location.href);
+    setMobileLinkCopied(true);
+    setTimeout(() => setMobileLinkCopied(false), 2000);
+  }
 
   function handleGenerateKeys() {
-    setPk1(generateKeypair());
-    setPk2(generateKeypair());
+    if (chain === "evm") {
+      setPk1(generateEvmKeypair());
+      setPk2(generateEvmKeypair());
+    } else {
+      setPk1(generateKeypair());
+      setPk2(generateKeypair());
+    }
     setStep("keys");
   }
 
   async function callCreateApi(pub1: string, pub2: string) {
+    // For connect-wallets: check localStorage first — skip creation if vault exists
+    if (createMode === "connect-wallets") {
+      const cached = lookupVaultByPublicKey(pub1) ?? lookupVaultByPublicKey(pub2);
+      if (cached?.vaultAddress) {
+        navigate(`/qoin/open?chain=solana&vault=${encodeURIComponent(cached.vaultAddress)}`);
+        return;
+      }
+    }
     setError("");
     setStep("creating");
     try {
@@ -89,12 +135,18 @@ export default function GenerateVault() {
           network: "mainnet",
         }),
       });
-      const data = await res.json() as { multisigAddress?: string; signature?: string; error?: string };
+      const data = await res.json() as { multisigAddress?: string; signature?: string | null; existing?: boolean; error?: string };
       if (!res.ok || data.error) throw new Error(data.error || "Failed to create Qoin.");
       setShieldAddress(data.multisigAddress!);
-      setTxSig(data.signature!);
+      setTxSig(data.signature ?? "");
       saveVaultAssociation(pub1, pub2, data.multisigAddress!, "mainnet");
-      setStep("done");
+      // Connect-wallets: redirect directly to dashboard (no keys to save)
+      // Cold-keys: show "done" step so user can save their generated keys
+      if (createMode === "connect-wallets") {
+        navigate(`/qoin/open?chain=solana&vault=${encodeURIComponent(data.multisigAddress!)}`);
+      } else {
+        setStep("done");
+      }
     } catch (e: unknown) {
       setError((e as Error).message || "Failed to create Qoin on-chain.");
       setStep(createMode === "connect-wallets" ? "intro" : "keys");
@@ -103,7 +155,28 @@ export default function GenerateVault() {
 
   async function handleActivateShield() {
     if (!pk1 || !pk2) return;
-    await callCreateApi(pk1.publicKey, pk2.publicKey);
+    if (chain === "evm") {
+      setError("");
+      setStep("creating");
+      try {
+        const res = await fetch("/api/evm/create-vault", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ k1Address: pk1.publicKey, k2Address: pk2.publicKey }),
+        });
+        const data = await res.json() as { vaultAddress?: string; txHash?: string | null; existing?: boolean; error?: string };
+        if (!res.ok || data.error) throw new Error(data.error || "Failed to create EVM Qoin.");
+        setEvmVaultAddress(data.vaultAddress!);
+        setEvmVaultTxHash(data.txHash ?? "");
+        saveEvmVaultAssociation(pk1.publicKey, pk2.publicKey, data.vaultAddress!);
+        setStep("done");
+      } catch (e: unknown) {
+        setError((e as Error).message || "Failed to create EVM Qoin on-chain.");
+        setStep("keys");
+      }
+    } else {
+      await callCreateApi(pk1.publicKey, pk2.publicKey);
+    }
   }
 
   async function handleCreateWithWallets() {
@@ -121,6 +194,12 @@ export default function GenerateVault() {
       setError("K1 and K2 must be different MetaMask accounts.");
       return;
     }
+    // Check localStorage first — redirect if vault already exists for these addresses
+    const cached = lookupEvmVaultByAddress(evmAddress1) ?? lookupEvmVaultByAddress(evmAddress2);
+    if (cached?.vaultAddress) {
+      navigate(`/qoin/open?chain=evm&vault=${encodeURIComponent(cached.vaultAddress)}`);
+      return;
+    }
     setError("");
     setStep("creating");
     try {
@@ -129,14 +208,13 @@ export default function GenerateVault() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ k1Address: evmAddress1, k2Address: evmAddress2 }),
       });
-      const data = await res.json() as { vaultAddress?: string; txHash?: string; error?: string };
+      const data = await res.json() as { vaultAddress?: string; txHash?: string | null; existing?: boolean; error?: string };
       if (!res.ok || data.error) throw new Error(data.error || "Vault creation failed.");
-      setEvmVaultAddress(data.vaultAddress!);
-      setEvmVaultTxHash(data.txHash!);
       saveEvmVaultAssociation(evmAddress1!, evmAddress2!, data.vaultAddress!);
-      setStep("done");
+      // Connect-wallets: redirect directly to dashboard
+      navigate(`/qoin/open?chain=evm&vault=${encodeURIComponent(data.vaultAddress!)}`);
     } catch (e: unknown) {
-      setError((e as Error).message || "Failed to create EVM vault.");
+      setError((e as Error).message || "Failed to create Ethereum vault.");
       setStep("intro");
     }
   }
@@ -233,7 +311,7 @@ export default function GenerateVault() {
                 <h1 className="font-sketch text-4xl sm:text-5xl mb-4 leading-tight">Activate Quantum Shield</h1>
                 <SketchWave className="w-40 mb-5" />
                 <p className="text-lg text-[#1a1a1a]/60 leading-relaxed">
-                  We generate independent signing keys and deploy your Qoin on-chain. All registered keys must sign every transfer. Enforced by the Solana protocol, not just this UI.
+                  We generate independent signing keys and deploy your Qoin on-chain. All registered keys must sign every transfer. Enforced by the {chain === "evm" ? "Gnosis Safe protocol" : "Solana protocol"}, not just this UI.
                 </p>
               </div>
 
@@ -275,18 +353,9 @@ export default function GenerateVault() {
                       </button>
                     </div>
                   </div>
-                  {chain === "evm" ? (
-                    <div className="border border-dashed border-[#F7931A]/40 rounded-sm px-4 py-5 text-center space-y-2">
-                      <p className="font-sketch text-base text-[#1a1a1a]">EVM Cold Keys</p>
-                      <p className="font-handwritten text-sm text-[#1a1a1a]/50">
-                        EVM cold-key vaults are coming soon. Switch to Connect Wallets to create an EVM vault now.
-                      </p>
-                    </div>
-                  ) : (
-                    <button onClick={handleGenerateKeys} className="btn-sketch w-full text-xl py-5">
-                      {t.generate.generateBtn}
-                    </button>
-                  )}
+                  <button onClick={handleGenerateKeys} className="btn-sketch w-full text-xl py-5">
+                    {t.generate.generateBtn}
+                  </button>
                 </div>
               )}
 
@@ -339,7 +408,7 @@ export default function GenerateVault() {
                             </div>
                           ) : (
                             <button
-                              onClick={connectK1}
+                              onClick={handleConnectK1}
                               disabled={evmConnecting1}
                               className="btn-sketch-outline w-full text-sm py-2 bg-white"
                             >
@@ -369,7 +438,7 @@ export default function GenerateVault() {
                             </div>
                           ) : (
                             <button
-                              onClick={connectK2}
+                              onClick={handleConnectK2}
                               disabled={evmConnecting2 || !evmAddress1}
                               className="btn-sketch-outline w-full text-sm py-2 bg-white disabled:opacity-30"
                             >
@@ -378,13 +447,46 @@ export default function GenerateVault() {
                           )}
                           {evmError2 && <p className="font-handwritten text-xs text-red-500 mt-1.5">{evmError2}</p>}
                           {!evmAddress1 && !evmAddress2 && (
-                            <p className="font-handwritten text-xs text-[#1a1a1a]/30 mt-1.5">Connect K1 first, then switch MetaMask accounts before connecting K2.</p>
+                            <p className="font-handwritten text-xs text-[#1a1a1a]/30 mt-1.5">Connect K1 first, then switch accounts before connecting K2.</p>
                           )}
                         </div>
                       </div>
 
+                      {showMobileNotice && (
+                        <div className="border-2 border-[#F7931A] bg-[#F7931A]/5 p-4 space-y-3">
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="font-sketch text-base text-[#1a1a1a]">Open in a Wallet Browser</p>
+                            <button
+                              onClick={() => setShowMobileNotice(false)}
+                              className="font-handwritten text-xs text-[#1a1a1a]/30 hover:text-[#1a1a1a] transition-colors flex-shrink-0 mt-0.5"
+                            >
+                              close
+                            </button>
+                          </div>
+                          <ol className="space-y-2">
+                            {[
+                              "Install MetaMask, Coinbase Wallet, or Trust Wallet on your phone.",
+                              "Open the app and tap the Browser or Discover tab.",
+                              "Copy the link below and paste it into the in-app browser.",
+                              "Once the page loads inside the app, tap Connect K1.",
+                            ].map((step, i) => (
+                              <li key={i} className="flex items-start gap-2.5">
+                                <span className="font-sketch text-xs text-[#F7931A] flex-shrink-0 w-4">{i + 1}.</span>
+                                <span className="font-handwritten text-xs text-[#1a1a1a]/70 leading-snug">{step}</span>
+                              </li>
+                            ))}
+                          </ol>
+                          <button
+                            onClick={copyMobileLink}
+                            className="btn-sketch-outline w-full text-sm py-2 bg-white"
+                          >
+                            {mobileLinkCopied ? "Copied!" : "Copy Link"}
+                          </button>
+                        </div>
+                      )}
+
                       {evmAddress1 && evmAddress2 && evmAddress1.toLowerCase() === evmAddress2.toLowerCase() && (
-                        <p className="font-handwritten text-xs text-red-500">K1 and K2 must be different accounts. Switch accounts in MetaMask before connecting K2.</p>
+                        <p className="font-handwritten text-xs text-red-500">K1 and K2 must be different accounts. Switch accounts before connecting K2.</p>
                       )}
 
                       {error && <p className="font-handwritten text-sm text-red-500">{error}</p>}
