@@ -12,7 +12,25 @@ if (rawPort && (Number.isNaN(port) || port <= 0)) {
 }
 
 const basePath = process.env.BASE_PATH ?? "/";
-const isReplit = process.env.REPL_ID !== undefined;
+
+async function loadReplitPlugins() {
+  try {
+    const plugins: import("vite").Plugin[] = [];
+    const overlay = await import("@replit/vite-plugin-runtime-error-modal");
+    plugins.push(overlay.default());
+    if (process.env.NODE_ENV !== "production") {
+      const cart = await import("@replit/vite-plugin-cartographer");
+      plugins.push(cart.cartographer({ root: path.resolve(import.meta.dirname, "..") }));
+      const banner = await import("@replit/vite-plugin-dev-banner");
+      plugins.push(banner.devBanner());
+    }
+    return plugins;
+  } catch {
+    return [];
+  }
+}
+
+const replitPlugins = process.env.REPL_ID ? await loadReplitPlugins() : [];
 
 export default defineConfig({
   base: basePath,
@@ -26,23 +44,7 @@ export default defineConfig({
     }),
     react(),
     tailwindcss(),
-    ...(isReplit
-      ? [
-          (await import("@replit/vite-plugin-runtime-error-modal")).default(),
-          ...(process.env.NODE_ENV !== "production"
-            ? [
-                await import("@replit/vite-plugin-cartographer").then((m) =>
-                  m.cartographer({
-                    root: path.resolve(import.meta.dirname, ".."),
-                  }),
-                ),
-                await import("@replit/vite-plugin-dev-banner").then((m) =>
-                  m.devBanner(),
-                ),
-              ]
-            : []),
-        ]
-      : []),
+    ...replitPlugins,
   ],
   resolve: {
     alias: {
