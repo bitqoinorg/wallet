@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode } from "react";
 import { PhantomWalletAdapter } from "@solana/wallet-adapter-phantom";
+import { SolflareWalletAdapter } from "@solana/wallet-adapter-solflare";
 import { Transaction } from "@solana/web3.js";
 
 type SignFn = (tx: Transaction) => Promise<Transaction>;
@@ -27,7 +28,7 @@ const WalletPairContext = createContext<WalletPairState | null>(null);
 
 export function WalletPairProvider({ children }: { children: ReactNode }) {
   const phantomRef = useRef<PhantomWalletAdapter | null>(null);
-  const phantom2Ref = useRef<PhantomWalletAdapter | null>(null);
+  const phantom2Ref = useRef<SolflareWalletAdapter | null>(null);
 
   const [phantomPubkey, setPhantomPubkey] = useState<string | null>(null);
   const [phantom2Pubkey, setPhantom2Pubkey] = useState<string | null>(null);
@@ -43,7 +44,7 @@ export function WalletPairProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const ph = new PhantomWalletAdapter();
-    const ph2 = new PhantomWalletAdapter();
+    const ph2 = new SolflareWalletAdapter();
     phantomRef.current = ph;
     phantom2Ref.current = ph2;
 
@@ -75,7 +76,32 @@ export function WalletPairProvider({ children }: { children: ReactNode }) {
       setPhantom2Error(err instanceof Error ? err.message : "Phantom (Key 2) connection failed.");
     });
 
+    // Listen for account switches directly on the Phantom provider.
+    // The adapter does not expose accountChanged, so we tap the raw provider.
+    // When the user flips accounts in Phantom, update the pubkey in place
+    // (no disconnect → no UI reset). AccessVault's useEffect watching
+    // phantomPubkey will re-run and auto-detect the Qoin for the new account.
+    const provider = (window as Record<string, unknown>).phantom as
+      | { solana?: { on?: (e: string, cb: (pk: { toBase58(): string } | null) => void) => void;
+                     off?: (e: string, cb: unknown) => void } }
+      | undefined;
+    const solProvider = provider?.solana;
+
+    const handleAccountChanged = (newPubkey: { toBase58(): string } | null) => {
+      if (newPubkey) {
+        setPhantomPubkey(newPubkey.toBase58());
+        setPhantomReady(true);
+      } else {
+        // User locked Phantom or disconnected all accounts
+        setPhantomPubkey(null);
+        setPhantomReady(false);
+      }
+    };
+
+    solProvider?.on?.("accountChanged", handleAccountChanged);
+
     return () => {
+      solProvider?.off?.("accountChanged", handleAccountChanged);
       ph.disconnect().catch(() => {});
       ph2.disconnect().catch(() => {});
     };
@@ -126,8 +152,8 @@ export function WalletPairProvider({ children }: { children: ReactNode }) {
 
   const signWithPhantom2: SignFn | null = phantom2Ready
     ? (tx: Transaction) => {
-        if (!phantom2Ref.current) throw new Error("Phantom (Key 2) not connected.");
-        return phantom2Ref.current.signTransaction(tx);
+        if (!phantom2Ref.current) throw new Error("Solflare (K2) not connected.");
+        return phantom2Ref.current.signTransaction(tx) as Promise<Transaction>;
       }
     : null;
 

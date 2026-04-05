@@ -1,4 +1,5 @@
-import { Switch, Route, Router as WouterRouter } from "wouter";
+import { Switch, Route, Router as WouterRouter, useLocation } from "wouter";
+import { useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -22,24 +23,35 @@ import Faq from "@/pages/Faq";
 
 const queryClient = new QueryClient();
 
+function ScrollToTop() {
+  const [location] = useLocation();
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" as ScrollBehavior });
+  }, [location]);
+  return null;
+}
+
 function Router() {
   return (
-    <Switch>
-      <Route path="/" component={Landing} />
-      <Route path="/qoin" component={Qoin} />
-      <Route path="/qoin/create" component={GenerateVault} />
-      <Route path="/qoin/open" component={AccessVault} />
-      <Route path="/why/problem" component={Problem} />
-      <Route path="/why/solution" component={Solution} />
-      <Route path="/why/quantum" component={QuantumThreat} />
-      <Route path="/how/start" component={GettingStarted} />
-      <Route path="/how/protocol" component={QonjointProtocol} />
-      <Route path="/how/keys" component={KeyManagement} />
-      <Route path="/proof/challenge" component={HackChallenge} />
-      <Route path="/proof/balance" component={LiveBalance} />
-      <Route path="/faq" component={Faq} />
-      <Route component={NotFound} />
-    </Switch>
+    <>
+      <ScrollToTop />
+      <Switch>
+        <Route path="/" component={Landing} />
+        <Route path="/qoin" component={Qoin} />
+        <Route path="/qoin/create" component={GenerateVault} />
+        <Route path="/qoin/open" component={AccessVault} />
+        <Route path="/why/problem" component={Problem} />
+        <Route path="/why/solution" component={Solution} />
+        <Route path="/why/quantum" component={QuantumThreat} />
+        <Route path="/how/start" component={GettingStarted} />
+        <Route path="/how/protocol" component={QonjointProtocol} />
+        <Route path="/how/keys" component={KeyManagement} />
+        <Route path="/proof/challenge" component={HackChallenge} />
+        <Route path="/proof/balance" component={LiveBalance} />
+        <Route path="/faq" component={Faq} />
+        <Route component={NotFound} />
+      </Switch>
+    </>
   );
 }
 

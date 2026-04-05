@@ -89,16 +89,63 @@ export default function QuantumThreat() {
           </div>
           <div className={`border-t ${divider} pt-6`}>
             <div className={`font-sketch text-2xl mb-4 ${text}`}>The Timeline Problem</div>
-            <div className="space-y-3">
+            <div className="space-y-4">
               {[
-                { year: "2019", event: "Google achieves quantum supremacy on narrow tasks" },
-                { year: "2023", event: "IBM reaches 1,121 qubit processor" },
-                { year: "2025", event: "Error correction milestones accelerate timelines" },
-                { year: "Near", event: "Cryptographically relevant quantum computers enter planning" },
+                {
+                  year: "2019",
+                  event: "Google achieves quantum supremacy on narrow tasks",
+                  source: "Nature",
+                  href: "https://www.nature.com/articles/s41586-019-1666-5",
+                },
+                {
+                  year: "2023",
+                  event: "IBM reaches 1,121 qubit processor (IBM Condor)",
+                  source: "IBM Newsroom",
+                  href: "https://newsroom.ibm.com/2023-12-04-IBM-Debuts-Next-Generation-Quantum-Processor-IBM-Quantum-Heron,-Adds-Groundbreaking-IBM-Quantum-System-Two",
+                },
+                {
+                  year: "2024",
+                  event: "Google Willow chip solves benchmark problem in 5 minutes that would take classical supercomputer 10 septillion years",
+                  source: "Google Blog",
+                  href: "https://blog.google/technology/research/google-willow-quantum-chip/",
+                },
+                {
+                  year: "2025",
+                  event: "Microsoft achieves first topological qubit, opening new hardware path for fault-tolerant quantum computing",
+                  source: "Microsoft Azure Blog",
+                  href: "https://azure.microsoft.com/en-us/blog/quantum/2025/02/19/microsoft-unveils-the-majorana-1-chip-charting-the-path-to-1-million-qubits/",
+                },
+                {
+                  year: "NIST",
+                  event: "First finalized post-quantum encryption standards released, confirming the threat is taken seriously at government level",
+                  source: "NIST",
+                  href: "https://www.nist.gov/news-events/news/2024/08/nist-releases-first-3-finalized-post-quantum-encryption-standards",
+                },
+                {
+                  year: "Near",
+                  event: "Cryptographically relevant quantum computers enter planning stages at major state actors",
+                  source: null,
+                  href: null,
+                },
               ].map((item) => (
                 <div key={item.year} className="flex items-start gap-4">
                   <span className="font-sketch text-sm text-[#F7931A] w-12 flex-shrink-0 pt-0.5">{item.year}</span>
-                  <span className={`font-body font-bold text-sm ${muted}`}>{item.event}</span>
+                  <div className="flex-1">
+                    <span className={`font-body font-bold text-sm ${muted}`}>{item.event}</span>
+                    {item.href && (
+                      <a
+                        href={item.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="ml-2 inline-flex items-center gap-0.5 font-body text-xs text-[#F7931A]/70 hover:text-[#F7931A] transition-colors underline underline-offset-2 decoration-[#F7931A]/30"
+                      >
+                        {item.source}
+                        <svg className="w-2.5 h-2.5 opacity-70" viewBox="0 0 12 12" fill="none">
+                          <path d="M2 2h8v8M10 2 4 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      </a>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
